@@ -1,0 +1,33 @@
+# netlify.toml: static Vite + Phaser build; no functions, no [[redirects]] (one index.html), no COOP/COEP headers
+[build]
+  command = "npm run build"          # Netlify runs npm ci first because package-lock.json is committed
+  publish = "dist"
+[build.environment]
+  NODE_VERSION = "24"                # never add NODE_ENV = "production": devDependencies would not install
+
+[[headers]]                          # Vite fingerprints dist/assets/*-[hash].*; game files live in public/game/, never public/assets/
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]                          # index.html keeps Netlify's default (max-age=0, must-revalidate; edge cache invalidated by every deploy)
+  for = "/game/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[context.deploy-preview]             # contexts change build settings only; headers are global
+  command = "npm run build"
+  [context.deploy-preview.environment]
+    VITE_BUILD_CHANNEL = "preview"

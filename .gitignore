@@ -1,0 +1,20 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.vscode/*
+!.vscode/launch.json
+*.log
+
+# Art sources: editable files live in the private sibling repo mogli-art-src (D14, D80).
+# Only runtime exports under public/game/ are committed to this repo.
+art-src/
+*.aseprite
+*.ase
+*.kra
+*.psd
+*.tmx
+*.wav
+*.flac
+*.als
+*.flp

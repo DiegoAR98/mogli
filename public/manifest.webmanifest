@@ -1,0 +1,11 @@
+{
+  "name": "Seeonee",
+  "short_name": "Seeonee",
+  "lang": "en",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b1410",
+  "theme_color": "#0b1410",
+  "icons": [{ "src": "/favicon.png", "sizes": "16x16", "type": "image/png" }]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "seeonee",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && node --experimental-strip-types tools/validate-levels.mjs && node tools/gen-credits.mjs --check && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "credits": "node tools/gen-credits.mjs"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "phaser": "4.2.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "~1.63.0",
+    "@types/node": "^26.6.3",
+    "rollup-plugin-license": "~3.7.1",
+    "typescript": "~7.0.2",
+    "vite": "~8.3.1",
+    "vitest": "~5.0.2"
+  }
+}
