@@ -12,6 +12,10 @@ body,
   overscroll-behavior: none;
 }
 
+#game {
+  position: relative;
+}
+
 canvas {
   display: block;
 }

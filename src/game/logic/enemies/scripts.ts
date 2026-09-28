@@ -3,7 +3,7 @@
  * (the langur); Charger, Turret and Diver arrive with the zones that introduce them.
  */
 
-import { LOBBER_TELEGRAPH_S, LOBBER_THROW_CYCLE_S } from '../../data/tuning';
+import { CHARGER_FLEE_S, CHARGER_TELEGRAPH_S, LOBBER_TELEGRAPH_S, LOBBER_THROW_CYCLE_S } from '../../data/tuning';
 
 export type LobberPhase = 'patrol' | 'telegraph' | 'throw' | 'cooldown' | 'fleeing' | 'stunned';
 
@@ -57,4 +57,76 @@ export function stepLobber(state: LobberState, dtS: number, stompedOrScared: boo
 /** Stomp scatters a regular enemy (D40); cobras, quill-pigs, bees, Buldeo and bosses are never stompable. */
 export function stompScatters(stompable: boolean): boolean {
   return stompable;
+}
+
+// --- Charger script (GDD §7.7 #2): Tabaqui, jackals and village dogs -----------------------------
+//
+// A carrier-flag entry (Tabaqui, jackals) never deals contact damage. Only a "thief" entry
+// (Tabaqui) steals: it telegraphs, walks to the nearest uncollected floor stone in range, picks
+// it up and carries it off, dropping the stone where it stands if hit or stomped. A non-thief
+// carrier (a patrolling jackal) never leaves the patrol phase on its own. The spatial parts
+// (which stone is nearest, whether the walk has reached it) are PlayScene's job; this module
+// only owns the phase timers, exactly like stepLobber.
+
+export type ChargerPhase = 'patrol' | 'telegraph' | 'stealing' | 'carrying' | 'fleeing';
+
+export interface ChargerState {
+  phase: ChargerPhase;
+  timerS: number;
+}
+
+export function initialChargerState(): ChargerState {
+  return { phase: 'patrol', timerS: 0 };
+}
+
+export interface ChargerStepInput {
+  hitOrStomped: boolean;
+  thief: boolean;
+  stoneNearby: boolean;
+  reachedStone: boolean;
+}
+
+export interface ChargerStepResult {
+  state: ChargerState;
+  startedStealing: boolean;
+  pickedUpStone: boolean;
+  droppedStone: boolean;
+}
+
+export function stepCharger(state: ChargerState, dtS: number, input: ChargerStepInput): ChargerStepResult {
+  if (input.hitOrStomped && state.phase !== 'fleeing') {
+    return { state: { phase: 'fleeing', timerS: 0 }, startedStealing: false, pickedUpStone: false, droppedStone: state.phase === 'carrying' };
+  }
+
+  const timerS = state.timerS + dtS;
+
+  switch (state.phase) {
+    case 'patrol':
+      if (input.thief && input.stoneNearby) {
+        return { state: { phase: 'telegraph', timerS: 0 }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+      }
+      return { state: { phase: 'patrol', timerS }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+
+    case 'telegraph':
+      if (timerS >= CHARGER_TELEGRAPH_S) {
+        return { state: { phase: 'stealing', timerS: 0 }, startedStealing: true, pickedUpStone: false, droppedStone: false };
+      }
+      return { state: { phase: 'telegraph', timerS }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+
+    case 'stealing':
+      if (input.reachedStone) {
+        return { state: { phase: 'carrying', timerS: 0 }, startedStealing: false, pickedUpStone: true, droppedStone: false };
+      }
+      return { state: { phase: 'stealing', timerS }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+
+    case 'carrying':
+      return { state: { phase: 'carrying', timerS }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+
+    case 'fleeing':
+    default:
+      if (timerS >= CHARGER_FLEE_S) {
+        return { state: { phase: 'patrol', timerS: 0 }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+      }
+      return { state: { phase: 'fleeing', timerS }, startedStealing: false, pickedUpStone: false, droppedStone: false };
+  }
 }

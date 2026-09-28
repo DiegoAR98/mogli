@@ -131,3 +131,19 @@ export const RED_FLOWER_CAP_S = 24;
 export const RED_FLOWER_FLEE_RADIUS_TILES = 6;
 export const GARLIC_SECONDS_PER_RUB = 15;
 export const GARLIC_CAP_S = 30;
+
+// Charger script (S3, GDD §7.7 #2): Tabaqui, jackals and (from L4) village dogs
+export const CHARGER_PATROL_SPEED_PX_S = 48;
+export const CHARGER_TELEGRAPH_S = 0.6;
+export const TABAQUI_CARRY_SPEED_PX_S = 96;
+export const TABAQUI_STEAL_RANGE_TILES = 6;
+export const TABAQUI_STEAL_REACH_PX = 4;
+export const CHARGER_FLEE_S = 10;
+
+// Quota chain (GDD §9.1): counter flip, sting, silhouette and toast durations
+export const QUOTA_SILHOUETTE_S = 3;
+export const QUOTA_TOAST_S = 2;
+
+// Save schema (GDD §9.5)
+export const SAVE_SCHEMA_VERSION = 1;
+export const SAVE_SLOT_COUNT = 3;

@@ -1,10 +1,14 @@
 import Phaser from 'phaser';
 import type { PlayScene } from './PlayScene';
+import { TouchControls } from '../systems/touchControls';
+import { Translator } from '../systems/locale';
+import type { Settings } from '../systems/settings';
+import { QUOTA_SILHOUETTE_S, QUOTA_TOAST_S, RED_FLOWER_CAP_S } from '../data/tuning';
 
 /**
- * Parallel scene (PLAN.md §3.2 rule 3): reads events and the registry only, never a Phaser
- * body. M1 ships the F3 debug overlay only; the real HUD (leaf pips, counter, cards, touch
- * controls) arrives with M2.
+ * Parallel scene (PLAN.md §3.2 rule 3): reads PlayScene's read-only accessors, the registry and
+ * the event bus, never a Phaser body of its own. Owns the top HUD row (GDD §11.2), the touch
+ * control layer, and the F3 debug overlay.
  */
 export class HudScene extends Phaser.Scene {
   private debugText?: Phaser.GameObjects.Text;
@@ -13,35 +17,115 @@ export class HudScene extends Phaser.Scene {
     if (event.code === 'F3') this.debugVisible = !this.debugVisible;
   };
 
+  private pipsText?: Phaser.GameObjects.Text;
+  private emberBar?: Phaser.GameObjects.Rectangle;
+  private counterText?: Phaser.GameObjects.Text;
+  private toastText?: Phaser.GameObjects.Text;
+  private throwableText?: Phaser.GameObjects.Text;
+
+  private touchControls?: TouchControls;
+  private touchControlsInitialized = false;
+  private quotaMetAtS: number | null = null;
+
   constructor() {
     super('Hud');
   }
 
   create(): void {
-    if (!(import.meta.env.DEV || import.meta.env.VITE_E2E)) return;
+    const translator = this.registry.get('translator') as Translator | undefined;
+    const settings = this.registry.get('settings') as Settings | undefined;
 
-    window.addEventListener('keydown', this.f3Handler);
-    this.debugText = this.add.text(4, 4, '', {
-      fontFamily: 'monospace',
-      fontSize: '8px',
-      color: '#f2e9d8',
-      backgroundColor: 'rgba(11, 20, 16, 0.7)',
-      padding: { x: 2, y: 2 },
-    });
-    this.debugText.setScrollFactor(0);
-    this.debugText.setDepth(1000);
+    if (translator) {
+      this.pipsText = this.add.text(8, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#f2e9d8' }).setScrollFactor(0).setDepth(900);
+      this.emberBar = this.add.rectangle(8, 20, 24, 3, 0xd8562a).setOrigin(0, 0.5).setScrollFactor(0).setDepth(900);
+      this.counterText = this.add.text(120, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#f2e9d8' }).setScrollFactor(0).setDepth(900);
+      this.throwableText = this.add.text(240, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#f2e9d8' }).setScrollFactor(0).setDepth(900);
+      this.toastText = this.add
+        .text(160, 24, '', { fontFamily: 'monospace', fontSize: '9px', color: '#f2e94e', align: 'center' })
+        .setOrigin(0.5, 0)
+        .setScrollFactor(0)
+        .setDepth(900);
+    }
+
+    if (import.meta.env.DEV || import.meta.env.VITE_E2E) {
+      window.addEventListener('keydown', this.f3Handler);
+      this.debugText = this.add.text(4, 40, '', {
+        fontFamily: 'monospace',
+        fontSize: '8px',
+        color: '#f2e9d8',
+        backgroundColor: 'rgba(11, 20, 16, 0.7)',
+        padding: { x: 2, y: 2 },
+      });
+      this.debugText.setScrollFactor(0);
+      this.debugText.setDepth(1000);
+    }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('keydown', this.f3Handler);
+      this.touchControls?.destroy();
     });
   }
 
   update(): void {
+    const play = this.scene.get('Play') as unknown as PlayScene;
+    this.initTouchControlsOnceReady(play);
+    this.updateHudRow(play);
+    this.updateDebugOverlay(play);
+  }
+
+  /** Play's InputSystem is only guaranteed to exist after its own create() has run, which can
+   * land after Hud's own create() when both scenes are started in the same frame (BootScene,
+   * LoadingScene), so the touch layer attaches lazily here instead of racing that order. */
+  private initTouchControlsOnceReady(play: PlayScene): void {
+    if (this.touchControlsInitialized) return;
+    const inputSystem = play.getInputSystem?.();
+    if (!inputSystem) return;
+    const settings = this.registry.get('settings') as Settings | undefined;
+    if (!settings) return;
+
+    this.touchControlsInitialized = true;
+    const gameDiv = document.getElementById('game') ?? document.body;
+    this.touchControls = new TouchControls(gameDiv, inputSystem);
+    this.touchControls.setPreset(settings.touchPreset);
+    this.touchControls.setOpacityPercent(settings.touchOpacityPercent);
+  }
+
+  private updateHudRow(play: PlayScene): void {
+    if (!this.pipsText) return;
+    const info = play.getHudInfo?.();
+    if (!info) return;
+
+    this.pipsText.setText('*'.repeat(info.pips) + '.'.repeat(info.maxPips - info.pips));
+    this.emberBar?.setVisible(info.redFlowerMeterS > 0);
+    this.emberBar?.setScale(Math.max(0, info.redFlowerMeterS / RED_FLOWER_CAP_S), 1);
+    this.emberBar?.setFillStyle(info.redFlowerLit ? 0xf2994e : 0x8a3a1a);
+
+    const translator = this.registry.get('translator') as Translator | undefined;
+    if (translator && this.counterText) {
+      this.counterText.setText(translator.t('hud.counter', { count: info.stonesCollected, quota: info.quotaValue }));
+      this.counterText.setColor(info.quotaMet ? '#f2e94e' : '#f2e9d8');
+    }
+    if (translator && this.throwableText) {
+      this.throwableText.setText(info.currentThrowable === 'nut' ? '∞' : `${info.redFlowerMeterS.toFixed(0)}s`);
+    }
+
+    if (translator && this.toastText) {
+      if (info.quotaJustMetAtS !== null && this.quotaMetAtS === null) {
+        this.quotaMetAtS = info.quotaJustMetAtS;
+      }
+      if (this.quotaMetAtS !== null) {
+        const elapsedSinceMet = info.quotaJustMetAtS !== null ? info.quotaJustMetAtS - this.quotaMetAtS : Infinity;
+        const showToast = elapsedSinceMet < QUOTA_SILHOUETTE_S + QUOTA_TOAST_S;
+        this.toastText.setText(showToast ? translator.t('hud.quotaToast', { name: translator.t('exit.akela') }) : '');
+      }
+    }
+  }
+
+  private updateDebugOverlay(play: PlayScene): void {
     if (!this.debugText) return;
     this.debugText.setVisible(this.debugVisible);
     if (!this.debugVisible) return;
 
-    const play = this.scene.get('Play') as unknown as PlayScene;
     const info = play.getDebugInfo?.();
     if (!info) return;
 

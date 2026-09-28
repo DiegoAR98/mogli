@@ -47,6 +47,8 @@ const DEFAULT_BINDINGS: Record<string, Action> = {
 const PRESS_EDGE_ACTIONS = new Set<Action>(['jump', 'throw', 'item', 'cycle', 'pause']);
 const GAMEPAD_DEADZONE = 0.25;
 
+export type DeviceKind = 'keyboard' | 'gamepad' | 'touch';
+
 export class InputSystem {
   private bindings: Record<string, Action>;
   private keysDown = new Set<string>();
@@ -54,6 +56,10 @@ export class InputSystem {
   private keysReleasedThisTick = new Set<string>();
   private touchHeld: Partial<ActionState> = {};
   private lastGamepadHeld: ActionState = emptyActionState();
+  private lastTouchHeld: ActionState = emptyActionState();
+
+  /** Glyphs in prompts follow the last-used device (GDD §4.3). */
+  lastDevice: DeviceKind = 'keyboard';
 
   constructor(bindings: Record<string, Action> = DEFAULT_BINDINGS) {
     this.bindings = bindings;
@@ -67,6 +73,7 @@ export class InputSystem {
     if (document.activeElement === document.body || document.activeElement === null) {
       event.preventDefault();
     }
+    this.lastDevice = 'keyboard';
     if (!this.keysDown.has(event.code)) {
       this.keysPressedThisTick.add(event.code);
     }
@@ -80,9 +87,10 @@ export class InputSystem {
     this.keysReleasedThisTick.add(event.code);
   };
 
-  /** Touch buttons (HudScene, M2) report held state here; M1 never calls this. */
+  /** Touch buttons (src/game/systems/touchControls.ts) report held state here. */
   setTouchHeld(action: Action, held: boolean): void {
     this.touchHeld[action] = held;
+    if (held) this.lastDevice = 'touch';
   }
 
   private pollGamepad(): ActionState {
@@ -116,10 +124,18 @@ export class InputSystem {
 
     const gamepadHeld = this.pollGamepad();
     for (const action of ACTIONS) {
-      if (gamepadHeld[action]) held[action] = true;
+      if (gamepadHeld[action]) {
+        held[action] = true;
+        if (!this.lastGamepadHeld[action]) this.lastDevice = 'gamepad';
+      }
       if (gamepadHeld[action] && !this.lastGamepadHeld[action] && PRESS_EDGE_ACTIONS.has(action)) pressed[action] = true;
       if (!gamepadHeld[action] && this.lastGamepadHeld[action]) released[action] = true;
-      if (this.touchHeld[action]) held[action] = true;
+
+      const touchHeld = Boolean(this.touchHeld[action]);
+      if (touchHeld) held[action] = true;
+      if (touchHeld && !this.lastTouchHeld[action] && PRESS_EDGE_ACTIONS.has(action)) pressed[action] = true;
+      if (!touchHeld && this.lastTouchHeld[action]) released[action] = true;
+      this.lastTouchHeld[action] = touchHeld;
     }
     this.lastGamepadHeld = gamepadHeld;
 

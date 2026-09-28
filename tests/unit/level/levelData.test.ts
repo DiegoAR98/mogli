@@ -42,6 +42,48 @@ describe('levelData', () => {
     expect(definition.platforms.some((p) => p.flags.includes('swing'))).toBe(true);
     expect(definition.platforms.some((p) => p.flags.includes('crumble'))).toBe(true);
     expect(definition.enemies).toHaveLength(1);
+    expect(definition.enemies[0].script).toBe('lobber');
+  });
+
+  it('defaults an enemy without a script property to lobber (M1 fixtures predate the field)', () => {
+    const enemy = { id: 20, type: 'enemy', x: 0, y: 0, width: 0, height: 0, properties: [{ name: 'entry', type: 'int', value: 1 }, { name: 'patrolLeft', type: 'int', value: 0 }, { name: 'patrolRight', type: 'int', value: 16 }, { name: 'facing', type: 'int', value: 1 }] };
+    const spawn = baseMap().layers[1] as Extract<TiledMap['layers'][number], { type: 'objectgroup' }>;
+    const map = baseMap({ layers: [baseMap().layers[0], { type: 'objectgroup', id: 2, name: 'entities', objects: [...spawn.objects, enemy] }] });
+    expect(parseLevel(map).enemies[0].script).toBe('lobber');
+  });
+
+  it('parses a charger enemy with thief/carrier flags', () => {
+    const enemy = {
+      id: 21,
+      type: 'enemy',
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      properties: [
+        { name: 'entry', type: 'int', value: 1 },
+        { name: 'patrolLeft', type: 'int', value: 0 },
+        { name: 'patrolRight', type: 'int', value: 16 },
+        { name: 'facing', type: 'int', value: 1 },
+        { name: 'script', type: 'string', value: 'charger' },
+        { name: 'flags', type: 'string', value: 'carrier,thief' },
+      ],
+    };
+    const spawn = baseMap().layers[1] as Extract<TiledMap['layers'][number], { type: 'objectgroup' }>;
+    const map = baseMap({ layers: [baseMap().layers[0], { type: 'objectgroup', id: 2, name: 'entities', objects: [...spawn.objects, enemy] }] });
+    const parsed = parseLevel(map).enemies[0];
+    expect(parsed.script).toBe('charger');
+    expect(parsed.flags).toEqual(['carrier', 'thief']);
+  });
+
+  it('parses an exit object and a pickup object', () => {
+    const exit = { id: 22, type: 'exit', x: 10, y: 10, width: 0, height: 0, properties: [{ name: 'characterId', type: 'string', value: 'akela' }] };
+    const pickup = { id: 23, type: 'pickup', x: 5, y: 5, width: 0, height: 0, properties: [{ name: 'kind', type: 'string', value: 'redFlowerPot' }] };
+    const spawn = baseMap().layers[1] as Extract<TiledMap['layers'][number], { type: 'objectgroup' }>;
+    const map = baseMap({ layers: [baseMap().layers[0], { type: 'objectgroup', id: 2, name: 'entities', objects: [...spawn.objects, exit, pickup] }] });
+    const definition = parseLevel(map);
+    expect(definition.exit).toEqual({ id: 22, x: 10, y: 10, characterId: 'akela' });
+    expect(definition.pickups).toEqual([{ id: 23, x: 5, y: 5, kind: 'redFlowerPot' }]);
   });
 
   it('resolves ground tile properties by gid, including the climbable creeper column', () => {
