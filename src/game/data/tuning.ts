@@ -147,3 +147,23 @@ export const QUOTA_TOAST_S = 2;
 // Save schema (GDD §9.5)
 export const SAVE_SCHEMA_VERSION = 1;
 export const SAVE_SLOT_COUNT = 3;
+
+// Turret script (S3, GDD §7.7 #3): the cobra of the Poison People
+export const TURRET_TELEGRAPH_S = 0.6;
+export const TURRET_LUNGE_ACTIVE_S = 0.3;
+export const TURRET_REST_S = 1.0;
+export const TURRET_TRIGGER_RANGE_TILES = 3; // "within 3 tiles it rears and lunges" (GDD §7.7 #3)
+export const TURRET_LUNGE_FORWARD_TILES = 2;
+export const TURRET_LUNGE_HEIGHT_TILES = 1.5;
+export const TURRET_HIDE_S = 8; // sinks into its hole after 2 nuts / 1 clod
+export const TURRET_HITS_TO_HIDE = 2;
+export const SNAKE_GATE_CALM_S = 10;
+
+// S7 BossMachine (GDD §8.1): recovery windows by tier, standard and heavy
+export const BOSS_RECOVERY_STANDARD_S_CUB = 1.0;
+export const BOSS_RECOVERY_STANDARD_S_WOLF = 0.6;
+export const BOSS_RECOVERY_STANDARD_S_LONE_WOLF = 0.4;
+export const BOSS_RECOVERY_HEAVY_S_CUB = 1.2;
+export const BOSS_RECOVERY_HEAVY_S_WOLF = 0.8;
+export const BOSS_RECOVERY_HEAVY_S_LONE_WOLF = 0.5;
+export const BOSS_CLOD_WINDOW_EXTEND_S = 0.2; // same as INTERACT_BOSS_HOLD_FRAMES's 2 s hold, GDD §8.2 beat 7

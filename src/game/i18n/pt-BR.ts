@@ -38,12 +38,19 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
   'card.l1.exit': 'Olhem bem--olhem bem, ó Lobos!',
   'card.skipPrompt': 'Pressione qualquer botão para continuar',
 
+  'level.l2.title': 'Tocas Frias',
+  'card.l2.kidnapCarry': 'Os Bandar-log agarram Mowgli e o carregam pelas copas das árvores.',
+  'card.l2.intro': 'Lá vamos nós num festão a voar, / Rumo à lua ciumenta, sem parar!',
+  'card.l2.birdGate': 'Nós somos do mesmo sangue, tu e eu',
+  'card.l2.exit': 'Um coração corajoso e uma língua cortês. Eles te levarão longe pela selva, filhote de homem.',
+
   'hud.counter': 'achadas {count}/{quota}',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Encontre {name}',
   'hud.fullMoon': 'Lua Cheia',
 
   'exit.akela': 'Akela',
+  'exit.kaa': 'Kaa',
 
   'pause.title': 'Pausado',
   'pause.resume': 'Retomar',

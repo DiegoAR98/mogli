@@ -128,7 +128,7 @@ export interface EnemyDef {
   patrolRight: number;
   facing: -1 | 1;
   flags: string[];
-  script: 'lobber' | 'charger';
+  script: 'lobber' | 'charger' | 'turret';
 }
 
 export interface ExitDef {
@@ -139,6 +139,22 @@ export interface ExitDef {
 }
 
 export interface PickupDef {
+  id: number;
+  x: number;
+  y: number;
+  kind: string;
+}
+
+export interface BossDoorDef {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  bossId: string;
+}
+
+export interface HelperDef {
   id: number;
   x: number;
   y: number;
@@ -164,6 +180,8 @@ export interface LevelDefinition {
   enemies: EnemyDef[];
   exit: ExitDef | null;
   pickups: PickupDef[];
+  bossDoor: BossDoorDef | null;
+  helpers: HelperDef[];
   groundLayer: { width: number; height: number; data: number[] } | null;
   tileProperties: Map<number, GroundTileProperties>; // by gid
 }
@@ -250,6 +268,8 @@ export function parseLevel(map: TiledMap): LevelDefinition {
     enemies: [],
     exit: null,
     pickups: [],
+    bossDoor: null,
+    helpers: [],
     groundLayer: null,
     tileProperties: new Map(),
   };
@@ -361,7 +381,7 @@ export function parseLevel(map: TiledMap): LevelDefinition {
           const flags = flagsRaw === undefined ? [] : String(flagsRaw).split(',').map((f) => f.trim());
           const scriptRaw = optionalProp(obj, 'script');
           const script = scriptRaw === undefined ? 'lobber' : (String(scriptRaw) as EnemyDef['script']);
-          if (script !== 'lobber' && script !== 'charger') {
+          if (script !== 'lobber' && script !== 'charger' && script !== 'turret') {
             throw new LevelValidationError(`Object ${obj.id} (enemy) has unknown script "${script}"`);
           }
           definition.enemies.push({ id: obj.id, x: obj.x, y: obj.y, entry, patrolLeft, patrolRight, facing, flags, script });
@@ -380,7 +400,19 @@ export function parseLevel(map: TiledMap): LevelDefinition {
           break;
         }
 
-        // bunch, pile, helper, altar, bossDoor, card: parsed by later milestones
+        case 'bossDoor': {
+          const bossId = String(requireProp(obj, 'bossId'));
+          definition.bossDoor = { id: obj.id, x: obj.x, y: obj.y, w: obj.width, h: obj.height, bossId };
+          break;
+        }
+
+        case 'helper': {
+          const kind = String(requireProp(obj, 'kind'));
+          definition.helpers.push({ id: obj.id, x: obj.x, y: obj.y, kind });
+          break;
+        }
+
+        // bunch, pile, altar, card: parsed by later milestones
         default:
           break;
       }

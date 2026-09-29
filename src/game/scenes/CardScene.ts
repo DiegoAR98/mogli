@@ -14,6 +14,8 @@ export interface CardSceneData {
   stats?: Array<{ labelKey: DictKey; value: string | number }>;
   nextScene: string;
   nextSceneData?: Record<string, unknown>;
+  /** 'start' (default) replaces the scene stack; 'resume' un-pauses a caller (in-level card triggers, GDD §10.4's Bird-gate and kidnap-carry fallback). */
+  nextAction?: 'start' | 'resume';
 }
 
 const PANEL_W = 288;
@@ -84,6 +86,19 @@ export class CardScene extends Phaser.Scene {
 
   private onAdvance = (): void => {
     if (!this.skippable) return;
-    this.scene.start(this.sceneData.nextScene, this.sceneData.nextSceneData);
+    if (this.sceneData.nextAction === 'resume') {
+      // The key/tap that dismisses this card was recorded by the resumed scene's own
+      // InputSystem too (its raw `window` keydown listener never stopped while Play was
+      // paused), so without clearing it, that same keypress replays as a fresh "pressed" edge
+      // next tick -- for Enter/Escape (bound to Pause) that means Play re-pauses itself the
+      // instant it resumes. Clearing on resume matches the existing "focus loss clears held
+      // input" rule (GDD §4.5).
+      const target = this.scene.get(this.sceneData.nextScene) as unknown as { getInputSystem?: () => { clearHeld: () => void } };
+      target.getInputSystem?.().clearHeld();
+      this.scene.stop();
+      this.scene.resume(this.sceneData.nextScene);
+    } else {
+      this.scene.start(this.sceneData.nextScene, this.sceneData.nextSceneData);
+    }
   };
 }

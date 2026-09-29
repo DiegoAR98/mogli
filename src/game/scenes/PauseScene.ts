@@ -28,6 +28,12 @@ export class PauseScene extends Phaser.Scene {
   }
 
   private resume(): void {
+    // Whatever key/tap selected "Resume" was also recorded by Play's own InputSystem (its raw
+    // window listener never stopped while paused), so it must be cleared before resuming or it
+    // replays as a fresh press next tick -- Enter/Escape is bound to Pause, so without this,
+    // resuming would immediately re-pause itself. Same fix as CardScene's card-dismiss resume.
+    const play = this.scene.get('Play') as unknown as PlayScene;
+    play.getInputSystem?.().clearHeld();
     this.scene.stop('Pause');
     this.scene.resume('Play');
   }

@@ -142,4 +142,14 @@ describe('levelData', () => {
     const map = baseMap({ layers: [baseMap().layers[0], { type: 'objectgroup', id: 2, name: 'entities', objects: [] }] });
     expect(() => parseLevel(map)).toThrow(/no spawn object/);
   });
+
+  it('parses a bossDoor object and a helper object', () => {
+    const bossDoor = { id: 30, type: 'bossDoor', x: 100, y: 100, width: 32, height: 16, properties: [{ name: 'bossId', type: 'string', value: 'B1' }] };
+    const helper = { id: 31, type: 'helper', x: 50, y: 50, width: 0, height: 0, properties: [{ name: 'kind', type: 'string', value: 'bagheera' }] };
+    const spawn = baseMap().layers[1] as Extract<TiledMap['layers'][number], { type: 'objectgroup' }>;
+    const map = baseMap({ layers: [baseMap().layers[0], { type: 'objectgroup', id: 2, name: 'entities', objects: [...spawn.objects, bossDoor, helper] }] });
+    const definition = parseLevel(map);
+    expect(definition.bossDoor).toEqual({ id: 30, x: 100, y: 100, w: 32, h: 16, bossId: 'B1' });
+    expect(definition.helpers).toEqual([{ id: 31, x: 50, y: 50, kind: 'bagheera' }]);
+  });
 });

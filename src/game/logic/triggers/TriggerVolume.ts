@@ -6,7 +6,7 @@
 
 import { INTERACT_HUT_DOOR_FRAMES, INTERACT_MASTER_WORDS_GATE_FRAMES, INTERACT_ROPE_FRAMES, INTERACT_BOSS_HOLD_FRAMES, RESPAWN_FADE_S } from '../../data/tuning';
 
-export type TriggerFlag = 'checkpoint' | 'pit' | 'truce' | 'slowWater' | 'safeWater' | 'tallGrass' | 'detect' | 'card' | 'door';
+export type TriggerFlag = 'checkpoint' | 'pit' | 'truce' | 'slowWater' | 'safeWater' | 'tallGrass' | 'detect' | 'card' | 'door' | 'snakeGate' | 'roar' | 'bossGate';
 
 export interface Rect {
   x: number;

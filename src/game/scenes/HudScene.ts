@@ -4,6 +4,9 @@ import { TouchControls } from '../systems/touchControls';
 import { Translator } from '../systems/locale';
 import type { Settings } from '../systems/settings';
 import { QUOTA_SILHOUETTE_S, QUOTA_TOAST_S, RED_FLOWER_CAP_S } from '../data/tuning';
+import type { DictKey } from '../i18n/en';
+
+const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa' };
 
 /**
  * Parallel scene (PLAN.md §3.2 rule 3): reads PlayScene's read-only accessors, the registry and
@@ -26,6 +29,7 @@ export class HudScene extends Phaser.Scene {
   private touchControls?: TouchControls;
   private touchControlsInitialized = false;
   private quotaMetAtS: number | null = null;
+  private bossDots: Phaser.GameObjects.Rectangle[] = [];
 
   constructor() {
     super('Hud');
@@ -45,6 +49,15 @@ export class HudScene extends Phaser.Scene {
         .setOrigin(0.5, 0)
         .setScrollFactor(0)
         .setDepth(900);
+
+      // Boss phase dots (GDD §11.2, §8.1): bottom-center, a group of 2/3/4 pips by tier, up to
+      // 3 phases; a fixed pool sized for the largest tier, shown/hidden per the current fight.
+      for (let phase = 0; phase < 3; phase++) {
+        for (let pip = 0; pip < 4; pip++) {
+          const dot = this.add.rectangle(0, 0, 5, 5, 0xf2e9d8).setScrollFactor(0).setDepth(900).setVisible(false);
+          this.bossDots.push(dot);
+        }
+      }
     }
 
     if (import.meta.env.DEV || import.meta.env.VITE_E2E) {
@@ -116,7 +129,39 @@ export class HudScene extends Phaser.Scene {
       if (this.quotaMetAtS !== null) {
         const elapsedSinceMet = info.quotaJustMetAtS !== null ? info.quotaJustMetAtS - this.quotaMetAtS : Infinity;
         const showToast = elapsedSinceMet < QUOTA_SILHOUETTE_S + QUOTA_TOAST_S;
-        this.toastText.setText(showToast ? translator.t('hud.quotaToast', { name: translator.t('exit.akela') }) : '');
+        const nameKey = EXIT_CHARACTER_KEYS[info.exitCharacterId ?? ''] ?? 'exit.akela';
+        this.toastText.setText(showToast ? translator.t('hud.quotaToast', { name: translator.t(nameKey) }) : '');
+      }
+    }
+
+    this.updateBossDots(info.boss);
+  }
+
+  private updateBossDots(boss: ReturnType<PlayScene['getHudInfo']>['boss']): void {
+    if (this.bossDots.length === 0) return;
+    if (!boss) {
+      for (const dot of this.bossDots) dot.setVisible(false);
+      return;
+    }
+
+    const cx = 160;
+    const gapX = 8;
+    const groupGapX = 16;
+    let index = 0;
+    for (let phase = 0; phase < boss.phaseCount; phase++) {
+      const pipsForThisPhase = boss.hitsRequired;
+      const groupWidth = (pipsForThisPhase - 1) * gapX;
+      const groupStartX = cx + (phase - (boss.phaseCount - 1) / 2) * (groupWidth + groupGapX);
+      for (let pip = 0; pip < 4; pip++) {
+        const dot = this.bossDots[index++];
+        if (pip >= pipsForThisPhase) {
+          dot.setVisible(false);
+          continue;
+        }
+        dot.setVisible(true);
+        dot.setPosition(groupStartX + pip * gapX, 168);
+        const filled = phase < boss.phaseIndex || (phase === boss.phaseIndex && pip < boss.hitsThisPhase);
+        dot.setFillStyle(filled ? 0xf2e94e : 0x554a3a);
       }
     }
   }

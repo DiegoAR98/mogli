@@ -16,16 +16,34 @@ import {
 } from '../logic/player/PlayerController';
 import { canGrabCreeper, creeperClimbVelocity, type CreeperClimbInput } from '../logic/player/creeper';
 import { COUNTER_INACTIVE, consumeCountdown, isCountdownActive, isLocked, startCountdown, tickCountdown } from '../logic/player/frameCounter';
-import { activateCheckpoint, healOnCheckpoint, respawnAtLastCheckpoint, type CheckpointState } from '../logic/triggers/TriggerVolume';
+import { activateCheckpoint, healOnCheckpoint, interactRequirementFrames, respawnAtLastCheckpoint, type CheckpointState } from '../logic/triggers/TriggerVolume';
 import { collectStone, type StoneRuntimeState } from '../logic/collectibles/Collectible';
 import { NUT_PARAMS, canThrow, projectileGravityPxS2, projectileVelocity, resolveAimDirection } from '../logic/projectiles/Projectile';
-import { initialLobberState, initialChargerState, stepLobber, stepCharger, stompScatters, type LobberState, type ChargerState } from '../logic/enemies/scripts';
+import {
+  initialLobberState,
+  initialChargerState,
+  initialTurretState,
+  stepLobber,
+  stepCharger,
+  stepTurret,
+  stompScatters,
+  turretIsStompable,
+  type LobberState,
+  type ChargerState,
+  type TurretState,
+} from '../logic/enemies/scripts';
 import { crumbleHasCollision, pendulumKinematics, startCrumble, stepCrumble, swingReleaseVx, type CrumbleState } from '../logic/platforms/PathFollower';
 import { initialRedFlowerState, isWithinFleeRadius, pickUpPot, tickRedFlower, toggleRedFlower, type RedFlowerState } from '../logic/items/RedFlower';
 import { activateBeckon, checkQuota, initialExitNpcState, initialQuotaState, touchExit, type ExitNpcState, type QuotaState } from '../logic/collectibles/ExitNPC';
 import { applyHit, canBeHit, isBlinkVisible } from '../logic/player/hitResponse';
+import { tickCountUp, isCountUpComplete } from '../logic/player/frameCounter';
+import { currentAttack, initialBossState, isHittable, registerHit, stepBoss, type BossAttackSub, type BossMachineState } from '../logic/boss/BossMachine';
+import { B1_FLUNG_FESTOON } from '../data/bosses';
 import { TIERS, type TierId } from '../data/tiers';
 import type { Settings } from '../systems/settings';
+import { Translator } from '../systems/locale';
+import type { DictKey } from '../i18n/en';
+import type { CardSceneData } from './CardScene';
 import {
   BODY_STANDING_H_PX,
   BODY_STANDING_W_PX,
@@ -49,6 +67,9 @@ import {
   TABAQUI_STEAL_RANGE_TILES,
   TABAQUI_STEAL_REACH_PX,
   TILE_PX,
+  TURRET_LUNGE_FORWARD_TILES,
+  TURRET_LUNGE_HEIGHT_TILES,
+  TURRET_TRIGGER_RANGE_TILES,
   WALK_SPEED_PX_S,
 } from '../data/tuning';
 
@@ -60,9 +81,10 @@ type Rect = Phaser.GameObjects.Rectangle & { body: Phaser.Physics.Arcade.Body };
 
 interface EnemyRuntime {
   sprite: Rect;
-  script: 'lobber' | 'charger';
+  script: 'lobber' | 'charger' | 'turret';
   lobberState: LobberState;
   chargerState: ChargerState;
+  turretState: TurretState;
   thief: boolean;
   patrolLeft: number;
   patrolRight: number;
@@ -79,6 +101,8 @@ interface NutRuntime {
 
 const NUT_SPEED_FOR_RANGE = 224;
 const KNOCKBACK_LOCK_FRAMES = 12; // 0.2 s (GDD §7.5)
+const SNAKE_GATE_ROOM_RADIUS_PX = 8 * TILE_PX; // "a room of cobras" (GDD §10.4), approximated as a fixed radius
+const GATE_INTERACT_RANGE_PX = 20;
 
 export class PlayScene extends Phaser.Scene {
   private level!: LevelDefinition;
@@ -126,16 +150,24 @@ export class PlayScene extends Phaser.Scene {
   private quota: QuotaState = initialQuotaState();
 
   private roarZones: Array<{ x: number; y: number; w: number; h: number; firedAt: number | null }> = [];
+  private cardZones: Array<{ x: number; y: number; w: number; h: number; textKey: string; fired: boolean }> = [];
+  private snakeGateZones: Array<{ x: number; y: number; w: number; h: number; fired: boolean }> = [];
+  private gates: Array<{ id: number; sprite: Rect; x: number; y: number; w: number; h: number; opened: boolean; holdFrames: number }> = [];
 
-  private swingObj?: {
-    sprite: Rect;
-    pivotX: number;
-    pivotY: number;
-    lengthPx: number;
-  };
-  private ridingSwing = false;
+  private swings: Array<{ sprite: Rect; pivotX: number; pivotY: number; lengthPx: number; periodS: number }> = [];
+  private ridingSwingIndex: number | null = null;
 
   private crumblePlatforms: Array<{ sprite: Rect; state: CrumbleState }> = [];
+
+  // --- S7 Boss encounter (GDD §8.1-8.2): reuses S3 scripts scaled up, per the GDD's own rule ---
+  private bossDoorZone?: { x: number; y: number; w: number; h: number };
+  private bossActive = false;
+  private bossState: BossMachineState = initialBossState();
+  private bossHurtboxSprite?: Rect;
+  private bossHazardSprite?: Rect;
+  private bossPhaseFired = false;
+  private bossGates: Array<{ sprite: Rect; opened: boolean }> = [];
+  private bossHelpers: Array<{ sprite: Rect; kind: string; holdFrames: number; held: boolean }> = [];
 
   private simTimeS = 0;
   private ended = false;
@@ -164,6 +196,8 @@ export class PlayScene extends Phaser.Scene {
     this.buildEnemies();
     this.buildPickups();
     this.buildExit();
+    this.buildBossDoor();
+    this.buildHelpers();
 
     this.checkpoint = activateCheckpoint({ checkpointId: 'spawn', x: this.level.spawn.x, y: this.level.spawn.y, spawnFacing: this.level.spawn.facing });
 
@@ -230,6 +264,20 @@ export class PlayScene extends Phaser.Scene {
         this.pitZones.push({ x: t.x, y: t.y, w: t.w, h: t.h });
       } else if (t.flag === 'roar') {
         this.roarZones.push({ x: t.x, y: t.y, w: t.w, h: t.h, firedAt: null });
+      } else if (t.flag === 'card') {
+        this.cardZones.push({ x: t.x, y: t.y, w: t.w, h: t.h, textKey: t.textKey ?? '', fired: false });
+      } else if (t.flag === 'snakeGate') {
+        this.snakeGateZones.push({ x: t.x, y: t.y, w: t.w, h: t.h, fired: false });
+      } else if (t.flag === 'door') {
+        const sprite = this.add.rectangle(t.x + t.w / 2, t.y + t.h / 2, t.w, t.h, 0x3a2a6a) as Rect;
+        this.physics.add.existing(sprite, true);
+        this.physics.add.collider(this.player, sprite);
+        this.gates.push({ id: t.id, sprite, x: t.x, y: t.y, w: t.w, h: t.h, opened: false, holdFrames: 0 });
+      } else if (t.flag === 'bossGate') {
+        const sprite = this.add.rectangle(t.x + t.w / 2, t.y + t.h / 2, t.w, t.h, 0x3a2a6a) as Rect;
+        this.physics.add.existing(sprite, true);
+        this.physics.add.collider(this.player, sprite);
+        this.bossGates.push({ sprite, opened: false });
       }
     }
   }
@@ -242,7 +290,7 @@ export class PlayScene extends Phaser.Scene {
         this.physics.add.existing(sprite);
         sprite.body.setAllowGravity(false);
         sprite.body.setImmovable(true);
-        this.swingObj = { sprite, pivotX: platform.x, pivotY: platform.y, lengthPx };
+        this.swings.push({ sprite, pivotX: platform.x, pivotY: platform.y, lengthPx, periodS: platform.periodS ?? SWING_PERIOD_S });
       } else if (platform.flags.includes('crumble')) {
         const sprite = this.add.rectangle(platform.x + platform.w / 2, platform.y + TILE_PX / 2, platform.w, TILE_PX, 0x8a6a4a) as Rect;
         this.physics.add.existing(sprite, true);
@@ -272,6 +320,7 @@ export class PlayScene extends Phaser.Scene {
         script: enemyDef.script,
         lobberState: initialLobberState(),
         chargerState: initialChargerState(),
+        turretState: initialTurretState(),
         thief: enemyDef.flags.includes('thief'),
         patrolLeft: enemyDef.patrolLeft,
         patrolRight: enemyDef.patrolRight,
@@ -298,6 +347,32 @@ export class PlayScene extends Phaser.Scene {
     this.exitSprite = sprite;
   }
 
+  private buildBossDoor(): void {
+    if (!this.level.bossDoor) return;
+    const bd = this.level.bossDoor;
+    this.bossDoorZone = { x: bd.x, y: bd.y, w: bd.w, h: bd.h };
+
+    const hurtbox = this.add.rectangle(bd.x, bd.y + bd.h - 20, 14, 14, 0x8a4a8a) as Rect;
+    this.physics.add.existing(hurtbox, true);
+    hurtbox.setVisible(false);
+    hurtbox.body.enable = false;
+    this.bossHurtboxSprite = hurtbox;
+
+    const hazard = this.add.rectangle(bd.x, bd.y + bd.h - 20, 16, 8, 0xaa2222) as Rect;
+    this.physics.add.existing(hazard, true);
+    hazard.setVisible(false);
+    hazard.body.enable = false;
+    this.bossHazardSprite = hazard;
+  }
+
+  private buildHelpers(): void {
+    for (const h of this.level.helpers) {
+      const sprite = this.add.rectangle(h.x, h.y - 8, 10, 16, 0x333333) as Rect;
+      this.physics.add.existing(sprite, true);
+      this.bossHelpers.push({ sprite, kind: h.kind, holdFrames: 0, held: false });
+    }
+  }
+
   // --- The worldstep tick (PLAN.md §4.2): every gameplay rule and timer lives here -------------
 
   private onTick(dtS: number): void {
@@ -312,11 +387,14 @@ export class PlayScene extends Phaser.Scene {
     }
 
     this.stepPlayer(snapshot, dtS);
+    this.stepGates(snapshot);
+    if (this.stepCardTriggers()) return;
     this.stepStoneOverlaps();
     this.stepPackstoneOverlaps();
     this.stepPitOverlaps();
     this.stepPickupOverlaps();
     this.stepRoarTriggers();
+    this.stepSnakeGates();
     this.stepRedFlower(snapshot, dtS);
     this.stepThrow(snapshot, dtS);
     this.stepNuts(dtS);
@@ -324,6 +402,9 @@ export class PlayScene extends Phaser.Scene {
     this.stepEnemies(dtS);
     this.stepSwing(dtS, snapshot);
     this.stepCrumblePlatforms();
+    this.stepBossDoor();
+    this.stepBossFight(dtS, snapshot);
+    this.stepBossGates();
     this.stepQuotaAndExit();
     this.stepIframes();
   }
@@ -562,6 +643,69 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
+  /** One-shot card triggers (GDD §10.4: the first Bird-gate, the kidnap-carry cinematic's card
+   * fallback). Returns true when a card just fired, so onTick can stop the rest of that tick. */
+  private stepCardTriggers(): boolean {
+    for (const zone of this.cardZones) {
+      if (zone.fired) continue;
+      const overlapping = this.player.x > zone.x && this.player.x < zone.x + zone.w && this.player.y > zone.y && this.player.y < zone.y + zone.h;
+      if (overlapping) {
+        zone.fired = true;
+        this.showCard(zone.textKey);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private showCard(textKey: string): void {
+    const translator = this.registry.get('translator') as Translator | undefined;
+    const line = translator && textKey ? translator.t(textKey as DictKey) : textKey;
+    this.scene.pause('Play');
+    this.scene.launch('Card', { lines: [line], nextScene: 'Play', nextAction: 'resume' } satisfies CardSceneData);
+  }
+
+  /** Snake-gate (GDD §10.4): touching it once calms every cobra within TABAQUI_STEAL_RANGE_TILES-
+   * scale proximity of the gate for SNAKE_GATE_CALM_S, without counting as a hit. */
+  private stepSnakeGates(): void {
+    for (const zone of this.snakeGateZones) {
+      if (zone.fired) continue;
+      const overlapping = this.player.x > zone.x && this.player.x < zone.x + zone.w && this.player.y > zone.y && this.player.y < zone.y + zone.h;
+      if (!overlapping) continue;
+      zone.fired = true;
+      const cx = zone.x + zone.w / 2;
+      const cy = zone.y + zone.h / 2;
+      for (const enemy of this.enemies) {
+        if (enemy.script !== 'turret') continue;
+        const distancePx = Phaser.Math.Distance.Between(cx, cy, enemy.sprite.x, enemy.sprite.y);
+        if (distancePx <= SNAKE_GATE_ROOM_RADIUS_PX) this.calmTurret(enemy);
+      }
+    }
+  }
+
+  /** Master Words gates (S5 door, GDD §4.1, §10.4): a 0.5 s crouch-hold interact opens the gate
+   * and it stays open for the rest of the session (GDD §9.5 keeps it through a respawn). */
+  private stepGates(snapshot: InputSnapshot): void {
+    for (const gate of this.gates) {
+      if (gate.opened) continue;
+      const cx = gate.x + gate.w / 2;
+      const cy = gate.y + gate.h / 2;
+      const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, cx, cy) < GATE_INTERACT_RANGE_PX;
+      // Deliberately not gated on grounded/this.crouched: both derive every tick from Arcade's
+      // blocked.down/touching.down, which can flicker false for a tick even while resting on a
+      // static floor (an engine timing quirk, not a crouch bug), which would otherwise reset
+      // this count-up sporadically. GDD's own rule is "Down held ... at an interact volume"
+      // (§4.1); requiring grounded here would only add fragility, not a needed guard.
+      const holding = near && snapshot.held.down;
+      gate.holdFrames = tickCountUp(gate.holdFrames, holding, interactRequirementFrames('masterWordsGate'));
+      if (isCountUpComplete(gate.holdFrames, interactRequirementFrames('masterWordsGate'))) {
+        gate.opened = true;
+        gate.sprite.setVisible(false);
+        gate.sprite.body.enable = false;
+      }
+    }
+  }
+
   private stepRedFlower(snapshot: InputSnapshot, dtS: number): void {
     if (snapshot.pressed.item) {
       this.redFlower = toggleRedFlower(this.redFlower);
@@ -572,7 +716,8 @@ export class PlayScene extends Phaser.Scene {
     for (const enemy of this.enemies) {
       const distanceTiles = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.sprite.x, enemy.sprite.y) / TILE_PX;
       if (isWithinFleeRadius(this.redFlower, distanceTiles)) {
-        this.forceEnemyFlee(enemy);
+        if (enemy.script === 'turret') this.calmTurret(enemy);
+        else this.forceEnemyFlee(enemy);
       }
     }
   }
@@ -656,14 +801,25 @@ export class PlayScene extends Phaser.Scene {
     if (enemy.script === 'lobber') {
       if (enemy.lobberState.phase === 'fleeing') return;
       enemy.lobberState = stepLobber(enemy.lobberState, 0, true).state;
-    } else {
+    } else if (enemy.script === 'charger') {
       if (enemy.chargerState.phase === 'fleeing') return;
       const result = stepCharger(enemy.chargerState, 0, { hitOrStomped: true, thief: enemy.thief, stoneNearby: false, reachedStone: false });
       enemy.chargerState = result.state;
       if (result.droppedStone && enemy.carriedStoneIndex !== null) {
         this.dropCarriedStone(enemy);
       }
+    } else {
+      // Turret (never stompable, so this only ever comes from a nut/clod hit): 2 hits sinks it
+      // into its hole (GDD §7.7 #3); a Red Flower scare goes through calmTurret() instead, since
+      // it is not a hit and does not count toward that threshold.
+      if (enemy.turretState.phase === 'hidden') return;
+      enemy.turretState = stepTurret(enemy.turretState, 0, { playerInRange: false, hit: true, calmed: false }).state;
     }
+  }
+
+  private calmTurret(enemy: EnemyRuntime): void {
+    if (enemy.turretState.phase === 'hidden') return;
+    enemy.turretState = stepTurret(enemy.turretState, 0, { playerInRange: false, hit: false, calmed: true }).state;
   }
 
   private dropCarriedStone(enemy: EnemyRuntime): void {
@@ -714,10 +870,39 @@ export class PlayScene extends Phaser.Scene {
 
       if (enemy.script === 'lobber') {
         this.stepLobberEnemy(enemy, dtS);
-      } else {
+      } else if (enemy.script === 'charger') {
         this.stepChargerEnemy(enemy, dtS);
+      } else {
+        this.stepTurretEnemy(enemy, dtS);
       }
     }
+  }
+
+  private stepTurretEnemy(enemy: EnemyRuntime, dtS: number): void {
+    const distanceTiles = Phaser.Math.Distance.Between(enemy.sprite.x, enemy.sprite.y, this.player.x, this.player.y) / TILE_PX;
+    const playerInRange = distanceTiles <= TURRET_TRIGGER_RANGE_TILES;
+
+    const result = stepTurret(enemy.turretState, dtS, { playerInRange, hit: false, calmed: false });
+    enemy.turretState = result.state;
+
+    if (result.didLunge) {
+      const dir = this.player.x < enemy.sprite.x ? -1 : 1;
+      const lungeRect = {
+        x: dir === 1 ? enemy.sprite.x : enemy.sprite.x - TURRET_LUNGE_FORWARD_TILES * TILE_PX,
+        y: enemy.sprite.y - TURRET_LUNGE_HEIGHT_TILES * TILE_PX,
+        width: TURRET_LUNGE_FORWARD_TILES * TILE_PX,
+        height: TURRET_LUNGE_HEIGHT_TILES * TILE_PX,
+      };
+      if (Phaser.Geom.Intersects.RectangleToRectangle(lungeRect as Phaser.Geom.Rectangle, this.player.getBounds())) {
+        this.applyHitToPlayer(dir as -1 | 1);
+      }
+    }
+
+    const hidden = enemy.turretState.phase === 'hidden';
+    enemy.sprite.setVisible(!hidden);
+    enemy.sprite.body.enable = !hidden;
+    const tint = enemy.turretState.phase === 'telegraph' ? 0xf2e94e : enemy.turretState.phase === 'lunge' ? 0xb84a4a : 0x4a8a4a;
+    enemy.sprite.setFillStyle(tint);
   }
 
   private stepLobberEnemy(enemy: EnemyRuntime, dtS: number): void {
@@ -811,6 +996,7 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private checkStomp(enemy: EnemyRuntime): boolean {
+    if (enemy.script === 'turret' && !turretIsStompable()) return false;
     if (!stompScatters(true)) return false;
     const phase = enemy.script === 'lobber' ? enemy.lobberState.phase : enemy.chargerState.phase;
     if (phase === 'fleeing') return false;
@@ -841,29 +1027,31 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private stepSwing(_dtS: number, snapshot: InputSnapshot): void {
-    if (!this.swingObj) return;
     const amplitudeRad = (SWING_AMPLITUDE_DEG * Math.PI) / 180;
-    const k = pendulumKinematics(this.swingObj.pivotX, this.swingObj.pivotY, this.swingObj.lengthPx, amplitudeRad, SWING_PERIOD_S, this.simTimeS);
-    this.swingObj.sprite.setPosition(k.x, k.y);
-    this.swingObj.sprite.body.reset(k.x, k.y);
 
-    if (!this.ridingSwing) {
-      const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, k.x, k.y) < 12;
-      if (near && !this.climbing) {
-        this.ridingSwing = true;
-        this.player.body.setAllowGravity(false);
+    for (let i = 0; i < this.swings.length; i++) {
+      const swing = this.swings[i];
+      const k = pendulumKinematics(swing.pivotX, swing.pivotY, swing.lengthPx, amplitudeRad, swing.periodS, this.simTimeS);
+      swing.sprite.setPosition(k.x, k.y);
+      swing.sprite.body.reset(k.x, k.y);
+
+      if (this.ridingSwingIndex === i) {
+        this.player.setPosition(k.x, k.y + 8);
+        this.player.body.setVelocity(k.vx, k.vy);
+
+        if (snapshot.pressed.jump) {
+          this.ridingSwingIndex = null;
+          this.player.body.setAllowGravity(true);
+          this.player.body.setVelocityX(swingReleaseVx(k.vx, JUMP_HORIZONTAL_BOOST_PX_S, RUN_SPEED_PX_S));
+          this.player.body.setVelocityY(-JUMP_LAUNCH_SPEED_PX_S);
+        }
+      } else if (this.ridingSwingIndex === null) {
+        const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, k.x, k.y) < 12;
+        if (near && !this.climbing) {
+          this.ridingSwingIndex = i;
+          this.player.body.setAllowGravity(false);
+        }
       }
-      return;
-    }
-
-    this.player.setPosition(k.x, k.y + 8);
-    this.player.body.setVelocity(k.vx, k.vy);
-
-    if (snapshot.pressed.jump) {
-      this.ridingSwing = false;
-      this.player.body.setAllowGravity(true);
-      this.player.body.setVelocityX(swingReleaseVx(k.vx, JUMP_HORIZONTAL_BOOST_PX_S, RUN_SPEED_PX_S));
-      this.player.body.setVelocityY(-JUMP_LAUNCH_SPEED_PX_S);
     }
   }
 
@@ -876,6 +1064,153 @@ export class PlayScene extends Phaser.Scene {
       if (entry.state.respawned) {
         entry.state = { crumbling: false, fallenAtS: null, respawned: false };
       }
+    }
+  }
+
+  // --- S7 Boss encounter (GDD §8.1-8.2) ----------------------------------------------------------
+
+  private stepBossDoor(): void {
+    if (!this.bossDoorZone || this.bossActive) return;
+    const zone = this.bossDoorZone;
+    const overlapping = this.player.x > zone.x && this.player.x < zone.x + zone.w && this.player.y > zone.y && this.player.y < zone.y + zone.h;
+    if (!overlapping) return;
+
+    this.bossActive = true;
+    // "Checkpoint at every boss door, instant retry" (GDD §8.1). zone.y+zone.h is the trigger's
+    // floor-level bottom edge (the zone itself spans upward from there so a standing player's
+    // body-center falls inside it), which is the right "feet y" for a respawn point.
+    this.checkpoint = activateCheckpoint({ checkpointId: 'boss-B1', x: zone.x, y: zone.y + zone.h, spawnFacing: 1 });
+    this.pips = healOnCheckpoint(LEAF_PIPS_MAX);
+  }
+
+  private stepBossFight(dtS: number, snapshot: InputSnapshot): void {
+    if (!this.bossActive || !this.bossHurtboxSprite || !this.bossHazardSprite) return;
+
+    if (this.bossState.defeated) {
+      this.stepBossVictory(snapshot);
+      return;
+    }
+
+    this.bossState = stepBoss(this.bossState, dtS, B1_FLUNG_FESTOON, this.tierId);
+    const attack = currentAttack(this.bossState, B1_FLUNG_FESTOON);
+    const hittable = isHittable(this.bossState);
+    this.updateBossHazard(attack, this.bossState.sub);
+
+    this.bossHurtboxSprite.setVisible(hittable);
+    this.bossHurtboxSprite.body.enable = hittable;
+
+    if (hittable) {
+      for (const nut of [...this.nuts]) {
+        if (Phaser.Geom.Intersects.RectangleToRectangle(nut.sprite.getBounds(), this.bossHurtboxSprite.getBounds())) {
+          this.bossState = registerHit(this.bossState, B1_FLUNG_FESTOON, this.tierId);
+          this.destroyNut(nut.sprite);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Phase-specific hazard shape (GDD §8.2): a rim nut rain, a festoon pendulum sweep reusing
+   * the same pendulumKinematics traversal swings use, then an advancing line. Each reuses an S3
+   * script's own math rather than inventing a fifth movement system (GDD §8.1). */
+  private updateBossHazard(attack: (typeof B1_FLUNG_FESTOON)['phases'][number]['attacks'][number], sub: BossAttackSub): void {
+    if (!this.bossDoorZone || !this.bossHazardSprite || !this.bossHurtboxSprite) return;
+    const anchorX = this.bossDoorZone.x;
+    const anchorY = this.bossDoorZone.y + this.bossDoorZone.h - 20;
+
+    switch (this.bossState.phaseIndex) {
+      case 0: {
+        this.bossHurtboxSprite.setPosition(anchorX, anchorY);
+        if (sub === 'active' && !this.bossPhaseFired) {
+          this.bossPhaseFired = true;
+          this.spawnBossNut(anchorX, anchorY);
+        }
+        if (sub !== 'active') this.bossPhaseFired = false;
+        this.bossHazardSprite.setVisible(false);
+        this.bossHazardSprite.body.enable = false;
+        break;
+      }
+      case 1: {
+        const amplitudeRad = (SWING_AMPLITUDE_DEG * Math.PI) / 180;
+        const k = pendulumKinematics(anchorX, anchorY - 24, 24, amplitudeRad, SWING_PERIOD_S, this.simTimeS);
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          this.bossHazardSprite.setPosition(k.x, k.y);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(this.player.x < k.x ? -1 : 1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        this.bossHurtboxSprite.setPosition(anchorX, anchorY);
+        break;
+      }
+      case 2:
+      default: {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          const t = Math.min(1, this.bossState.timerS / attack.activeS);
+          const x = Phaser.Math.Linear(anchorX + 60, anchorX - 40, t);
+          this.bossHazardSprite.setPosition(x, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        this.bossHurtboxSprite.setPosition(anchorX - 40, anchorY);
+        break;
+      }
+    }
+  }
+
+  private spawnBossNut(x: number, y: number): void {
+    const dir = x < this.player.x ? 1 : -1;
+    const sprite = this.add.rectangle(x, y, 4, 4, 0xb84a4a) as Rect;
+    this.physics.add.existing(sprite);
+    sprite.body.setVelocity(dir * NUT_SPEED_FOR_RANGE, -40);
+    sprite.body.setGravityY(RISING_GRAVITY_PX_S2 * 0.25);
+    this.physics.add.collider(sprite, this.groundLayer, () => this.destroyEnemyNut(sprite));
+    this.enemyNuts.push(sprite);
+    this.time.delayedCall(2000, () => {
+      if (this.enemyNuts.includes(sprite)) this.destroyEnemyNut(sprite);
+    });
+  }
+
+  /** The Dance resolution (GDD §8.2 beat 7): a 2 s crouch-hold on each of Bagheera and Baloo. */
+  private stepBossVictory(snapshot: InputSnapshot): void {
+    this.bossHurtboxSprite?.setVisible(false);
+    if (this.bossHurtboxSprite) this.bossHurtboxSprite.body.enable = false;
+    this.bossHazardSprite?.setVisible(false);
+    if (this.bossHazardSprite) this.bossHazardSprite.body.enable = false;
+
+    for (const helper of this.bossHelpers) {
+      if (helper.held) continue;
+      const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, helper.sprite.x, helper.sprite.y) < GATE_INTERACT_RANGE_PX;
+      const holding = near && snapshot.held.down;
+      helper.holdFrames = tickCountUp(helper.holdFrames, holding, interactRequirementFrames('bossHold'));
+      if (isCountUpComplete(helper.holdFrames, interactRequirementFrames('bossHold'))) {
+        helper.held = true;
+        helper.sprite.setFillStyle(0x88cc88);
+      }
+    }
+  }
+
+  private bossVictoryComplete(): boolean {
+    return this.bossState.defeated && this.bossHelpers.length > 0 && this.bossHelpers.every((h) => h.held);
+  }
+
+  private stepBossGates(): void {
+    if (this.bossGates.length === 0 || !this.bossVictoryComplete()) return;
+    for (const gate of this.bossGates) {
+      if (gate.opened) continue;
+      gate.opened = true;
+      gate.sprite.setVisible(false);
+      gate.sprite.body.enable = false;
     }
   }
 
@@ -917,7 +1252,7 @@ export class PlayScene extends Phaser.Scene {
       vy: Math.round(this.player.body.velocity.y),
       coyoteFrames: this.coyoteFrames,
       bufferFrames: this.bufferFrames,
-      state: this.climbing ? 'climbing' : this.ridingSwing ? 'swinging' : this.crouched ? 'crouched' : 'normal',
+      state: this.climbing ? 'climbing' : this.ridingSwingIndex !== null ? 'swinging' : this.crouched ? 'crouched' : 'normal',
       pips: this.pips,
       stones: `${this.stonesCollected}/${this.level.stones.length}`,
       deaths: this.deaths,
@@ -934,10 +1269,14 @@ export class PlayScene extends Phaser.Scene {
       quotaMet: this.quota.met,
       quotaJustMetAtS: this.quota.met ? this.simTimeS : null,
       exitPhase: this.exitNpc.phase,
+      exitCharacterId: this.level.exit?.characterId ?? null,
       redFlowerMeterS: this.redFlower.meterS,
       redFlowerLit: this.redFlower.lit,
       currentThrowable: this.throwableOrder[this.throwableIndex],
       throwableSlots: this.throwableOrder.length,
+      boss: this.bossActive
+        ? { phaseIndex: this.bossState.phaseIndex, phaseCount: B1_FLUNG_FESTOON.phases.length, hitsThisPhase: this.bossState.hitsThisPhase, hitsRequired: TIERS[this.tierId].bossHitsPerPhase, defeated: this.bossState.defeated }
+        : null,
     };
   }
 

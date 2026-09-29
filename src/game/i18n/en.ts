@@ -37,12 +37,19 @@ export const en = {
   'card.l1.exit': 'Look well--look well, O Wolves!',
   'card.skipPrompt': 'Press any button to continue',
 
+  'level.l2.title': 'Cold Lairs',
+  'card.l2.kidnapCarry': 'The Bandar-log snatch Mowgli up and carry him across the tree-tops.',
+  'card.l2.intro': 'Here we go in a flung festoon, / Half-way up to the jealous moon!',
+  'card.l2.birdGate': 'We be of one blood, ye and I',
+  'card.l2.exit': 'A brave heart and a courteous tongue. They shall carry thee far through the jungle, manling.',
+
   'hud.counter': 'found {count}/{quota}',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Find {name}',
   'hud.fullMoon': 'Full Moon',
 
   'exit.akela': 'Akela',
+  'exit.kaa': 'Kaa',
 
   'pause.title': 'Paused',
   'pause.resume': 'Resume',

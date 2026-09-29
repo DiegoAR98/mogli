@@ -3,7 +3,18 @@
  * (the langur); Charger, Turret and Diver arrive with the zones that introduce them.
  */
 
-import { CHARGER_FLEE_S, CHARGER_TELEGRAPH_S, LOBBER_TELEGRAPH_S, LOBBER_THROW_CYCLE_S } from '../../data/tuning';
+import {
+  CHARGER_FLEE_S,
+  CHARGER_TELEGRAPH_S,
+  LOBBER_TELEGRAPH_S,
+  LOBBER_THROW_CYCLE_S,
+  SNAKE_GATE_CALM_S,
+  TURRET_HIDE_S,
+  TURRET_HITS_TO_HIDE,
+  TURRET_LUNGE_ACTIVE_S,
+  TURRET_REST_S,
+  TURRET_TELEGRAPH_S,
+} from '../../data/tuning';
 
 export type LobberPhase = 'patrol' | 'telegraph' | 'throw' | 'cooldown' | 'fleeing' | 'stunned';
 
@@ -129,4 +140,87 @@ export function stepCharger(state: ChargerState, dtS: number, input: ChargerStep
       }
       return { state: { phase: 'fleeing', timerS }, startedStealing: false, pickedUpStone: false, droppedStone: false };
   }
+}
+
+// --- Turret script (GDD §7.7 #3): the cobra of the Poison People, quill-pigs (straight-shot ---
+// variant) and white cobras reuse this same shape. Never stompable (D40): the head is not a
+// platform. Two hits sink it into its hole; the Snake-gate calms a room the same way, for its
+// own duration, without counting as a hit.
+
+export type TurretPhase = 'idle' | 'telegraph' | 'lunge' | 'rest' | 'hidden';
+
+export interface TurretState {
+  phase: TurretPhase;
+  timerS: number;
+  hideForS: number;
+  hitsTaken: number;
+}
+
+export function initialTurretState(): TurretState {
+  return { phase: 'idle', timerS: 0, hideForS: 0, hitsTaken: 0 };
+}
+
+export interface TurretStepInput {
+  playerInRange: boolean;
+  hit: boolean;
+  calmed: boolean;
+}
+
+export interface TurretStepResult {
+  state: TurretState;
+  didLunge: boolean;
+}
+
+export function stepTurret(state: TurretState, dtS: number, input: TurretStepInput): TurretStepResult {
+  if (input.calmed && state.phase !== 'hidden') {
+    return { state: { phase: 'hidden', timerS: 0, hideForS: SNAKE_GATE_CALM_S, hitsTaken: 0 }, didLunge: false };
+  }
+
+  if (input.hit && state.phase !== 'hidden') {
+    const hitsTaken = state.hitsTaken + 1;
+    if (hitsTaken >= TURRET_HITS_TO_HIDE) {
+      return { state: { phase: 'hidden', timerS: 0, hideForS: TURRET_HIDE_S, hitsTaken: 0 }, didLunge: false };
+    }
+    return { state: { ...state, hitsTaken }, didLunge: false };
+  }
+
+  const timerS = state.timerS + dtS;
+
+  switch (state.phase) {
+    case 'idle':
+      if (input.playerInRange) {
+        return { state: { phase: 'telegraph', timerS: 0, hideForS: 0, hitsTaken: state.hitsTaken }, didLunge: false };
+      }
+      return { state, didLunge: false };
+
+    case 'telegraph':
+      if (timerS >= TURRET_TELEGRAPH_S) {
+        return { state: { ...state, phase: 'lunge', timerS: 0 }, didLunge: true };
+      }
+      return { state: { ...state, timerS }, didLunge: false };
+
+    case 'lunge':
+      if (timerS >= TURRET_LUNGE_ACTIVE_S) {
+        return { state: { ...state, phase: 'rest', timerS: 0 }, didLunge: false };
+      }
+      return { state: { ...state, timerS }, didLunge: false };
+
+    case 'rest':
+      if (timerS >= TURRET_REST_S) {
+        return { state: { ...state, phase: 'idle', timerS: 0 }, didLunge: false };
+      }
+      return { state: { ...state, timerS }, didLunge: false };
+
+    case 'hidden':
+    default:
+      if (timerS >= state.hideForS) {
+        return { state: { phase: 'idle', timerS: 0, hideForS: 0, hitsTaken: 0 }, didLunge: false };
+      }
+      return { state: { ...state, timerS }, didLunge: false };
+  }
+}
+
+/** Cobras and white cobras are never stompable (GDD §7.4): "the head is not a platform." */
+export function turretIsStompable(): false {
+  return false;
 }
