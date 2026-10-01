@@ -18,7 +18,7 @@ import { canGrabCreeper, creeperClimbVelocity, type CreeperClimbInput } from '..
 import { COUNTER_INACTIVE, consumeCountdown, isCountdownActive, isLocked, startCountdown, tickCountdown } from '../logic/player/frameCounter';
 import { activateCheckpoint, healOnCheckpoint, interactRequirementFrames, respawnAtLastCheckpoint, type CheckpointState } from '../logic/triggers/TriggerVolume';
 import { collectStone, type StoneRuntimeState } from '../logic/collectibles/Collectible';
-import { NUT_PARAMS, canThrow, projectileGravityPxS2, projectileVelocity, resolveAimDirection } from '../logic/projectiles/Projectile';
+import { CLOD_PARAMS, CLOD_PILE_ROW, NUT_PARAMS, canThrow, projectileGravityPxS2, projectileVelocity, resolveAimDirection } from '../logic/projectiles/Projectile';
 import {
   initialLobberState,
   initialChargerState,
@@ -32,31 +32,57 @@ import {
   type ChargerState,
   type TurretState,
 } from '../logic/enemies/scripts';
-import { crumbleHasCollision, pendulumKinematics, startCrumble, stepCrumble, swingReleaseVx, type CrumbleState } from '../logic/platforms/PathFollower';
+import {
+  carryPosition,
+  crumbleHasCollision,
+  pendulumKinematics,
+  startCrumble,
+  stepCrumble,
+  swingReleaseVx,
+  trunkLaunchVelocity,
+  type CrumbleState,
+  type Waypoint,
+} from '../logic/platforms/PathFollower';
 import { initialRedFlowerState, isWithinFleeRadius, pickUpPot, tickRedFlower, toggleRedFlower, type RedFlowerState } from '../logic/items/RedFlower';
 import { activateBeckon, checkQuota, initialExitNpcState, initialQuotaState, touchExit, type ExitNpcState, type QuotaState } from '../logic/collectibles/ExitNPC';
 import { applyHit, canBeHit, isBlinkVisible } from '../logic/player/hitResponse';
 import { tickCountUp, isCountUpComplete } from '../logic/player/frameCounter';
-import { currentAttack, initialBossState, isHittable, registerHit, stepBoss, type BossAttackSub, type BossMachineState } from '../logic/boss/BossMachine';
-import { B1_FLUNG_FESTOON } from '../data/bosses';
+import { currentAttack, initialBossState, isHittable, registerHit, stepBoss, type BossAttackSub, type BossData, type BossMachineState } from '../logic/boss/BossMachine';
+import { B1_FLUNG_FESTOON, B2_LAME_ONE } from '../data/bosses';
 import { TIERS, type TierId } from '../data/tiers';
 import type { Settings } from '../systems/settings';
 import { Translator } from '../systems/locale';
 import type { DictKey } from '../i18n/en';
 import type { CardSceneData } from './CardScene';
 import {
+  B2_FALLING_ROCK_INTERVAL_S,
+  B2_FALLING_ROCK_LANES,
+  B2_LAME_CHARGE_SPEED_PX_S,
+  B2_POUNCE_ARC_TILES,
+  B2_ROAR_PUSH_TILES,
+  B2_SWIPE_HEIGHT_TILES,
   BODY_STANDING_H_PX,
   BODY_STANDING_W_PX,
+  BUFFALO_ADVANCE_SPEED_PX_S,
+  CARRY_WAIT_AT_MARKER_S,
   CHARGER_PATROL_SPEED_PX_S,
   CLIMB_SPEED_PX_S,
   COYOTE_FRAMES,
+  DOG_LUNGE_RANGE_TILES,
+  DOG_LUNGE_SPEED_PX_S,
   IFRAMES_FRAMES,
   JUMP_BUFFER_FRAMES,
   JUMP_HORIZONTAL_BOOST_PX_S,
   JUMP_LAUNCH_SPEED_PX_S,
   LEAF_PIPS_MAX,
   MAX_FALL_SPEED_PX_S,
-  NUT_COOLDOWN_S,
+  QUILL_PIG_CYCLE_S,
+  QUILL_PIG_HIGH_HEIGHT_TILES,
+  QUILL_PIG_LOW_HEIGHT_TILES,
+  QUILL_PIG_PATROL_SPEED_PX_S,
+  QUILL_PIG_SHOT_SPEED_PX_S,
+  QUILL_PIG_TELEGRAPH_S,
+  QUILL_PIG_TRIGGER_RANGE_TILES,
   RESPAWN_FADE_S,
   RISING_GRAVITY_PX_S2,
   RUN_SPEED_PX_S,
@@ -67,6 +93,7 @@ import {
   TABAQUI_STEAL_RANGE_TILES,
   TABAQUI_STEAL_REACH_PX,
   TILE_PX,
+  TRUNK_LAUNCH_RANGE_TILES,
   TURRET_LUNGE_FORWARD_TILES,
   TURRET_LUNGE_HEIGHT_TILES,
   TURRET_TRIGGER_RANGE_TILES,
@@ -91,6 +118,14 @@ interface EnemyRuntime {
   direction: -1 | 1;
   carriedStoneIndex: number | null;
   targetStoneIndex: number | null;
+  /** Quill-pig (GDD §7.7 #4): a Lobber that waddles and only throws within range, straight not arced. */
+  quillPig: boolean;
+  /** Pariah dogs (GDD §7.7 #2): a Charger that deals contact damage and lunge-charges in line. */
+  contactDamage: boolean;
+  lunge: boolean;
+  chargeDir: -1 | 1;
+  /** Truce zone (GDD §10.5): every enemy is passive and walks to drink while true. */
+  truced: boolean;
 }
 
 interface NutRuntime {
@@ -142,8 +177,10 @@ export class PlayScene extends Phaser.Scene {
 
   private redFlower: RedFlowerState = initialRedFlowerState();
   private redFlowerPickups: Array<{ sprite: Phaser.GameObjects.Rectangle; claimed: boolean }> = [];
-  private throwableOrder: Array<'nut' | 'redFlower'> = ['nut'];
+  private throwableOrder: Array<'nut' | 'clod' | 'redFlower'> = ['nut'];
   private throwableIndex = 0;
+  private clodCount = 0;
+  private clodPickups: Array<{ sprite: Phaser.GameObjects.Rectangle; claimed: boolean }> = [];
 
   private exitNpc: ExitNpcState = initialExitNpcState();
   private exitSprite?: Phaser.GameObjects.Rectangle;
@@ -152,15 +189,30 @@ export class PlayScene extends Phaser.Scene {
   private roarZones: Array<{ x: number; y: number; w: number; h: number; firedAt: number | null }> = [];
   private cardZones: Array<{ x: number; y: number; w: number; h: number; textKey: string; fired: boolean }> = [];
   private snakeGateZones: Array<{ x: number; y: number; w: number; h: number; fired: boolean }> = [];
-  private gates: Array<{ id: number; sprite: Rect; x: number; y: number; w: number; h: number; opened: boolean; holdFrames: number }> = [];
+  private gates: Array<{ id: number; sprite: Rect; x: number; y: number; w: number; h: number; opened: boolean; holdFrames: number; kind: 'masterWordsGate' | 'hutDoor' }> = [];
 
   private swings: Array<{ sprite: Rect; pivotX: number; pivotY: number; lengthPx: number; periodS: number }> = [];
   private ridingSwingIndex: number | null = null;
 
   private crumblePlatforms: Array<{ sprite: Rect; state: CrumbleState }> = [];
 
+  // --- S4 carry platforms (GDD §10.5-10.6): Hathi's sons, buffalo (advanceOnHit), Rama (B2) ----
+  private carryPlatforms: Array<{
+    sprite: Rect;
+    waypoints: Waypoint[];
+    speedPxS: number;
+    waitS: number;
+    advanceOnHit: boolean;
+    advancing: boolean;
+  }> = [];
+  private bouncePads: Array<{ sprite: Rect; cooldownS: number }> = [];
+  private fences: Array<{ sprite: Rect; broken: boolean }> = [];
+  private truceZones: Array<{ x: number; y: number; w: number; h: number }> = [];
+
   // --- S7 Boss encounter (GDD §8.1-8.2): reuses S3 scripts scaled up, per the GDD's own rule ---
   private bossDoorZone?: { x: number; y: number; w: number; h: number };
+  private bossId: string | null = null;
+  private bossData: BossData = B1_FLUNG_FESTOON;
   private bossActive = false;
   private bossState: BossMachineState = initialBossState();
   private bossHurtboxSprite?: Rect;
@@ -272,13 +324,22 @@ export class PlayScene extends Phaser.Scene {
         const sprite = this.add.rectangle(t.x + t.w / 2, t.y + t.h / 2, t.w, t.h, 0x3a2a6a) as Rect;
         this.physics.add.existing(sprite, true);
         this.physics.add.collider(this.player, sprite);
-        this.gates.push({ id: t.id, sprite, x: t.x, y: t.y, w: t.w, h: t.h, opened: false, holdFrames: 0 });
+        const kind = t.gateKind === 'hutDoor' ? 'hutDoor' : 'masterWordsGate';
+        this.gates.push({ id: t.id, sprite, x: t.x, y: t.y, w: t.w, h: t.h, opened: false, holdFrames: 0, kind });
       } else if (t.flag === 'bossGate') {
         const sprite = this.add.rectangle(t.x + t.w / 2, t.y + t.h / 2, t.w, t.h, 0x3a2a6a) as Rect;
         this.physics.add.existing(sprite, true);
         this.physics.add.collider(this.player, sprite);
         this.bossGates.push({ sprite, opened: false });
+      } else if (t.flag === 'truce') {
+        this.truceZones.push({ x: t.x, y: t.y, w: t.w, h: t.h });
       }
+    }
+    for (const fence of this.level.fences) {
+      const sprite = this.add.rectangle(fence.x + fence.w / 2, fence.y + fence.h / 2, fence.w, fence.h, 0x8a7a4a) as Rect;
+      this.physics.add.existing(sprite, true);
+      this.physics.add.collider(this.player, sprite);
+      this.fences.push({ sprite, broken: false });
     }
   }
 
@@ -296,6 +357,19 @@ export class PlayScene extends Phaser.Scene {
         this.physics.add.existing(sprite, true);
         this.physics.add.collider(this.player, sprite, () => this.onCrumbleTouched(sprite));
         this.crumblePlatforms.push({ sprite, state: { crumbling: false, fallenAtS: null, respawned: false } });
+      } else if (platform.flags.includes('carry')) {
+        const waypoints: Waypoint[] = [{ x: platform.x, y: platform.y }, ...(platform.waypoints ?? [])];
+        const sprite = this.add.rectangle(platform.x, platform.y, platform.w || 3 * TILE_PX, platform.h || 6, 0x6a8a4a) as Rect;
+        this.physics.add.existing(sprite);
+        sprite.body.setAllowGravity(false);
+        sprite.body.setImmovable(true);
+        this.physics.add.collider(this.player, sprite);
+        const advanceOnHit = platform.flags.includes('advanceOnHit');
+        this.carryPlatforms.push({ sprite, waypoints, speedPxS: platform.speedPxS, waitS: platform.waitS ?? CARRY_WAIT_AT_MARKER_S, advanceOnHit, advancing: false });
+      } else if (platform.flags.includes('bounce')) {
+        const sprite = this.add.rectangle(platform.x + platform.w / 2, platform.y + platform.h / 2, platform.w, platform.h, 0xd8a657) as Rect;
+        this.physics.add.existing(sprite, true);
+        this.bouncePads.push({ sprite, cooldownS: 0 });
       }
     }
   }
@@ -327,16 +401,26 @@ export class PlayScene extends Phaser.Scene {
         direction: enemyDef.facing,
         carriedStoneIndex: null,
         targetStoneIndex: null,
+        quillPig: enemyDef.flags.includes('quillPig'),
+        contactDamage: enemyDef.flags.includes('contactDamage'),
+        lunge: enemyDef.flags.includes('lunge'),
+        chargeDir: enemyDef.facing,
+        truced: false,
       });
     }
   }
 
   private buildPickups(): void {
     for (const pickup of this.level.pickups) {
-      if (pickup.kind !== 'redFlowerPot') continue;
-      const sprite = this.add.rectangle(pickup.x, pickup.y - 6, 8, 10, 0xd8562a);
-      this.physics.add.existing(sprite, true);
-      this.redFlowerPickups.push({ sprite, claimed: false });
+      if (pickup.kind === 'redFlowerPot') {
+        const sprite = this.add.rectangle(pickup.x, pickup.y - 6, 8, 10, 0xd8562a);
+        this.physics.add.existing(sprite, true);
+        this.redFlowerPickups.push({ sprite, claimed: false });
+      } else if (pickup.kind === 'clodPile') {
+        const sprite = this.add.rectangle(pickup.x, pickup.y - 4, 10, 8, 0x8a6a3a);
+        this.physics.add.existing(sprite, true);
+        this.clodPickups.push({ sprite, claimed: false });
+      }
     }
   }
 
@@ -351,6 +435,8 @@ export class PlayScene extends Phaser.Scene {
     if (!this.level.bossDoor) return;
     const bd = this.level.bossDoor;
     this.bossDoorZone = { x: bd.x, y: bd.y, w: bd.w, h: bd.h };
+    this.bossId = bd.bossId;
+    this.bossData = bd.bossId === 'B2' ? B2_LAME_ONE : B1_FLUNG_FESTOON;
 
     const hurtbox = this.add.rectangle(bd.x, bd.y + bd.h - 20, 14, 14, 0x8a4a8a) as Rect;
     this.physics.add.existing(hurtbox, true);
@@ -402,6 +488,8 @@ export class PlayScene extends Phaser.Scene {
     this.stepEnemies(dtS);
     this.stepSwing(dtS, snapshot);
     this.stepCrumblePlatforms();
+    this.stepCarryPlatforms(dtS);
+    this.stepBouncePads();
     this.stepBossDoor();
     this.stepBossFight(dtS, snapshot);
     this.stepBossGates();
@@ -629,6 +717,17 @@ export class PlayScene extends Phaser.Scene {
         if (!this.throwableOrder.includes('redFlower')) this.throwableOrder.push('redFlower');
       }
     }
+    for (const pickup of this.clodPickups) {
+      if (pickup.claimed) continue;
+      const dx = pickup.sprite.x - this.player.x;
+      const dy = pickup.sprite.y - this.player.y;
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 14) {
+        pickup.claimed = true;
+        pickup.sprite.setVisible(false);
+        this.clodCount = Math.min(CLOD_PILE_ROW.cap, this.clodCount + CLOD_PILE_ROW.count);
+        if (!this.throwableOrder.includes('clod')) this.throwableOrder.splice(1, 0, 'clod');
+      }
+    }
   }
 
   private stepRoarTriggers(): void {
@@ -683,8 +782,9 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
-  /** Master Words gates (S5 door, GDD §4.1, §10.4): a 0.5 s crouch-hold interact opens the gate
-   * and it stays open for the rest of the session (GDD §9.5 keeps it through a respawn). */
+  /** Master Words gates and hut doors (S5 door, GDD §4.1, §10.4, §10.6): a crouch-hold interact
+   * opens the gate (0.5 s for a Master Words gate, 0.25 s for a hut door) and it stays open for
+   * the rest of the session (GDD §9.5 keeps it through a respawn). */
   private stepGates(snapshot: InputSnapshot): void {
     for (const gate of this.gates) {
       if (gate.opened) continue;
@@ -697,8 +797,9 @@ export class PlayScene extends Phaser.Scene {
       // this count-up sporadically. GDD's own rule is "Down held ... at an interact volume"
       // (§4.1); requiring grounded here would only add fragility, not a needed guard.
       const holding = near && snapshot.held.down;
-      gate.holdFrames = tickCountUp(gate.holdFrames, holding, interactRequirementFrames('masterWordsGate'));
-      if (isCountUpComplete(gate.holdFrames, interactRequirementFrames('masterWordsGate'))) {
+      const requiredFrames = interactRequirementFrames(gate.kind);
+      gate.holdFrames = tickCountUp(gate.holdFrames, holding, requiredFrames);
+      if (isCountUpComplete(gate.holdFrames, requiredFrames)) {
         gate.opened = true;
         gate.sprite.setVisible(false);
         gate.sprite.body.enable = false;
@@ -756,22 +857,34 @@ export class PlayScene extends Phaser.Scene {
       this.throwableIndex = (this.throwableIndex + 1) % this.throwableOrder.length;
     }
     if (!snapshot.pressed.throw) return;
-    if (!canThrow(this.nuts.length, this.throwCooldownS, NUT_PARAMS)) return;
+
+    const current = this.throwableOrder[this.throwableIndex];
+    if (current === 'redFlower') return; // the timed item toggles on the item button, never thrown
+    if (current === 'clod' && this.clodCount <= 0) return;
+
+    const params = current === 'clod' ? CLOD_PARAMS : NUT_PARAMS;
+    if (!canThrow(this.nuts.length, this.throwCooldownS, params)) return;
+
+    this.throwCooldownS = params.cooldownS;
+    if (current === 'clod') this.clodCount--;
+
+    // Truce zone (GDD §10.5): a throw drops at Mowgli's own feet with a soft "no", never flies.
+    if (this.isInTruceZone(this.player.x, this.player.y)) return;
 
     const aim = resolveAimDirection({ left: snapshot.held.left, right: snapshot.held.right, up: snapshot.held.up, down: snapshot.held.down, facing: this.facing });
-    const velocity = projectileVelocity(aim, NUT_PARAMS);
+    const velocity = projectileVelocity(aim, params);
     const spawnX = this.player.x + aim.dx * 10;
     const spawnY = this.player.y - (this.crouched ? 4 : 8);
 
-    const sprite = this.add.rectangle(spawnX, spawnY, 4, 4, 0x8a6a3a) as Rect;
+    const color = current === 'clod' ? 0x6a5a3a : 0x8a6a3a;
+    const sprite = this.add.rectangle(spawnX, spawnY, 4, 4, color) as Rect;
     this.physics.add.existing(sprite);
     sprite.body.setVelocity(velocity.vx, velocity.vy);
-    sprite.body.setGravityY(projectileGravityPxS2(NUT_PARAMS, RISING_GRAVITY_PX_S2));
+    sprite.body.setGravityY(projectileGravityPxS2(params, RISING_GRAVITY_PX_S2));
     sprite.body.setAllowGravity(true);
     this.physics.add.collider(sprite, this.groundLayer, () => this.destroyNut(sprite));
 
-    this.nuts.push({ sprite, spawnX, rangePx: NUT_PARAMS.rangeTiles * TILE_PX });
-    this.throwCooldownS = NUT_COOLDOWN_S;
+    this.nuts.push({ sprite, spawnX, rangePx: params.rangeTiles * TILE_PX });
   }
 
   private destroyNut(sprite: Phaser.GameObjects.Rectangle): void {
@@ -786,9 +899,20 @@ export class PlayScene extends Phaser.Scene {
         this.destroyNut(nut.sprite);
         continue;
       }
+      let hit = false;
       for (const enemy of this.enemies) {
         if (Phaser.Geom.Intersects.RectangleToRectangle(nut.sprite.getBounds(), enemy.sprite.getBounds())) {
           this.forceEnemyFlee(enemy);
+          this.destroyNut(nut.sprite);
+          hit = true;
+          break;
+        }
+      }
+      if (hit) continue;
+      for (const carry of this.carryPlatforms) {
+        if (!carry.advanceOnHit) continue;
+        if (Phaser.Geom.Intersects.RectangleToRectangle(nut.sprite.getBounds(), carry.sprite.getBounds())) {
+          this.registerBuffaloHit(carry.sprite);
           this.destroyNut(nut.sprite);
           break;
         }
@@ -865,6 +989,15 @@ export class PlayScene extends Phaser.Scene {
 
   private stepEnemies(dtS: number): void {
     for (const enemy of this.enemies) {
+      enemy.truced = this.isInTruceZone(enemy.sprite.x, enemy.sprite.y);
+      if (enemy.truced) {
+        // Truce zone (GDD §10.5): passive, walks to drink -- no attack, no stomp threat, never a
+        // hit source. A gray-box simplification of "walks to drink" is simply standing down.
+        enemy.sprite.body.setVelocityX(0);
+        enemy.sprite.setFillStyle(0x4a8a4a);
+        continue;
+      }
+
       const stomped = this.checkStomp(enemy);
       if (stomped) this.forceEnemyFlee(enemy);
 
@@ -906,11 +1039,34 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private stepLobberEnemy(enemy: EnemyRuntime, dtS: number): void {
+    const body = enemy.sprite.body;
+
+    if (enemy.quillPig) {
+      const distanceTiles = Phaser.Math.Distance.Between(enemy.sprite.x, enemy.sprite.y, this.player.x, this.player.y) / TILE_PX;
+      const rangeGate = distanceTiles <= QUILL_PIG_TRIGGER_RANGE_TILES;
+      const result = stepLobber(enemy.lobberState, dtS, false, rangeGate, QUILL_PIG_CYCLE_S, QUILL_PIG_TELEGRAPH_S);
+      enemy.lobberState = result.state;
+      if (result.didThrow) this.spawnQuillShots(enemy);
+
+      if (enemy.lobberState.phase === 'fleeing') {
+        const fleeDir = enemy.sprite.x < this.player.x ? -1 : 1;
+        body.setVelocityX(fleeDir * RUN_SPEED_PX_S * 1.2);
+      } else if (enemy.lobberState.phase === 'patrol') {
+        body.setVelocityX(enemy.direction * QUILL_PIG_PATROL_SPEED_PX_S);
+        if (enemy.sprite.x <= enemy.patrolLeft) enemy.direction = 1;
+        if (enemy.sprite.x >= enemy.patrolRight) enemy.direction = -1;
+      } else {
+        body.setVelocityX(0);
+      }
+      const tint = enemy.lobberState.phase === 'telegraph' ? 0xf2e94e : enemy.lobberState.phase === 'fleeing' ? 0x888888 : 0x8a6a4a;
+      enemy.sprite.setFillStyle(tint);
+      return;
+    }
+
     const result = stepLobber(enemy.lobberState, dtS, false);
     enemy.lobberState = result.state;
     if (result.didThrow) this.spawnEnemyNut(enemy);
 
-    const body = enemy.sprite.body;
     if (enemy.lobberState.phase === 'fleeing') {
       const fleeDir = enemy.sprite.x < this.player.x ? -1 : 1;
       body.setVelocityX(fleeDir * RUN_SPEED_PX_S * 1.2);
@@ -919,6 +1075,23 @@ export class PlayScene extends Phaser.Scene {
     }
     const tint = enemy.lobberState.phase === 'telegraph' ? 0xf2e94e : enemy.lobberState.phase === 'fleeing' ? 0x888888 : 0xb84a4a;
     enemy.sprite.setFillStyle(tint);
+  }
+
+  /** Quill-pig straight shots (GDD §7.7 #4): one low (0.5 tile), one high (1.5 tiles), both
+   * straight ahead rather than the langur's arc. */
+  private spawnQuillShots(enemy: EnemyRuntime): void {
+    const dir = enemy.sprite.x < this.player.x ? 1 : -1;
+    for (const heightTiles of [QUILL_PIG_LOW_HEIGHT_TILES, QUILL_PIG_HIGH_HEIGHT_TILES]) {
+      const sprite = this.add.rectangle(enemy.sprite.x, enemy.sprite.y - heightTiles * TILE_PX, 4, 4, 0x8a6a4a) as Rect;
+      this.physics.add.existing(sprite);
+      sprite.body.setAllowGravity(false);
+      sprite.body.setVelocity(dir * QUILL_PIG_SHOT_SPEED_PX_S, 0);
+      this.physics.add.collider(sprite, this.groundLayer, () => this.destroyEnemyNut(sprite));
+      this.enemyNuts.push(sprite);
+      this.time.delayedCall(2000, () => {
+        if (this.enemyNuts.includes(sprite)) this.destroyEnemyNut(sprite);
+      });
+    }
   }
 
   private stepChargerEnemy(enemy: EnemyRuntime, dtS: number): void {
@@ -933,13 +1106,21 @@ export class PlayScene extends Phaser.Scene {
       const target = this.stoneSprites[enemy.targetStoneIndex];
       reachedStone = Math.abs(enemy.sprite.x - target.x) <= TABAQUI_STEAL_REACH_PX;
     }
+    const playerInLine =
+      enemy.lunge &&
+      enemy.chargerState.phase === 'patrol' &&
+      Math.abs(enemy.sprite.y - this.player.y) < TILE_PX * 2 &&
+      Phaser.Math.Distance.Between(enemy.sprite.x, enemy.sprite.y, this.player.x, this.player.y) / TILE_PX <= DOG_LUNGE_RANGE_TILES;
 
-    const result = stepCharger(enemy.chargerState, dtS, { hitOrStomped: false, thief: enemy.thief, stoneNearby, reachedStone });
+    const result = stepCharger(enemy.chargerState, dtS, { hitOrStomped: false, thief: enemy.thief, stoneNearby, reachedStone, lungeEnabled: enemy.lunge, playerInLine });
     enemy.chargerState = result.state;
     if (result.pickedUpStone && enemy.targetStoneIndex !== null) {
       enemy.carriedStoneIndex = enemy.targetStoneIndex;
       this.stoneCarried[enemy.carriedStoneIndex] = true;
       this.stoneSprites[enemy.carriedStoneIndex].setVisible(false);
+    }
+    if (result.startedCharging) {
+      enemy.chargeDir = this.player.x < enemy.sprite.x ? -1 : 1;
     }
 
     switch (enemy.chargerState.phase) {
@@ -968,6 +1149,12 @@ export class PlayScene extends Phaser.Scene {
         }
         break;
       }
+      case 'charging':
+        body.setVelocityX(enemy.chargeDir * DOG_LUNGE_SPEED_PX_S);
+        break;
+      case 'recovering':
+        body.setVelocityX(0);
+        break;
       case 'fleeing': {
         const fleeDir = enemy.sprite.x < this.player.x ? -1 : 1;
         body.setVelocityX(fleeDir * RUN_SPEED_PX_S * 1.2);
@@ -975,7 +1162,20 @@ export class PlayScene extends Phaser.Scene {
       }
     }
 
-    const tint = enemy.chargerState.phase === 'telegraph' ? 0xf2e94e : enemy.chargerState.phase === 'fleeing' ? 0x888888 : enemy.chargerState.phase === 'carrying' ? 0xc9b458 : 0x6a8a4a;
+    if (enemy.contactDamage && enemy.chargerState.phase !== 'fleeing' && Phaser.Geom.Intersects.RectangleToRectangle(enemy.sprite.getBounds(), this.player.getBounds())) {
+      this.applyHitToPlayer(enemy.sprite.x < this.player.x ? 1 : -1);
+    }
+
+    const tint =
+      enemy.chargerState.phase === 'telegraph'
+        ? 0xf2e94e
+        : enemy.chargerState.phase === 'fleeing'
+          ? 0x888888
+          : enemy.chargerState.phase === 'carrying'
+            ? 0xc9b458
+            : enemy.chargerState.phase === 'charging'
+              ? 0xb84a4a
+              : 0x6a8a4a;
     enemy.sprite.setFillStyle(tint);
   }
 
@@ -1067,6 +1267,95 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
+  // --- S4 carry platforms (GDD §10.5-10.6): Hathi's sons, buffalo (advanceOnHit), Rama (B2) -----
+
+  /** advanceOnHit (buffalo, GDD §10.6): a nut on its rump sends it charging toward its second
+   * waypoint, breaking any thorn fence it meets; it stays there once it arrives (a one-time
+   * path-opener, not a perpetual shuttle -- the GDD's "sends it charging to the next waypoint"
+   * reads as a single unlock, not a new cycle). */
+  private registerBuffaloHit(sprite: Rect): void {
+    const entry = this.carryPlatforms.find((c) => c.sprite === sprite);
+    if (!entry || !entry.advanceOnHit || entry.advancing || entry.waypoints.length < 2) return;
+    entry.advancing = true;
+  }
+
+  private stepCarryPlatforms(dtS: number): void {
+    for (const c of this.carryPlatforms) {
+      const prevX = c.sprite.x;
+      const prevY = c.sprite.y;
+      let next: { x: number; y: number };
+
+      if (c.advanceOnHit) {
+        if (c.advancing) {
+          const target = c.waypoints[1];
+          const dir = Math.sign(target.x - prevX) || 1;
+          const distRemaining = Math.abs(target.x - prevX);
+          const step = Math.min(distRemaining, BUFFALO_ADVANCE_SPEED_PX_S * dtS);
+          next = { x: prevX + dir * step, y: c.waypoints[0].y };
+          if (step >= distRemaining) c.advancing = false; // arrived: stays, path stays open
+        } else {
+          next = { x: prevX, y: prevY };
+        }
+      } else {
+        const pos = carryPosition(c.waypoints, c.speedPxS, c.waitS, this.simTimeS);
+        next = { x: pos.x, y: pos.y };
+      }
+
+      c.sprite.body.reset(next.x, next.y);
+      const dx = next.x - prevX;
+      const dy = next.y - prevY;
+      if (dx === 0 && dy === 0) continue;
+
+      // Break any thorn fence this (advancing) platform now overlaps (GDD §10.6's "breakable tag").
+      if (c.advanceOnHit) {
+        for (const fence of this.fences) {
+          if (fence.broken) continue;
+          if (Phaser.Geom.Intersects.RectangleToRectangle(c.sprite.getBounds(), fence.sprite.getBounds())) {
+            fence.broken = true;
+            fence.sprite.setVisible(false);
+            fence.sprite.body.enable = false;
+          }
+        }
+      }
+
+      // A rider standing on top is carried along (Arcade doesn't do this for free). Geometric
+      // proximity only, deliberately not Arcade's touching.down/blocked.down: those can read
+      // false for a single tick even at rest (D95h), and here the platform's own body is
+      // teleported every tick via body.reset(), which can desync Arcade's own contact flags far
+      // more than a static floor ever does. stepPlayer (which ran earlier this same tick) still
+      // applied normal gravity since it never saw a real ground contact, so riding must pin the
+      // player's y to the platform's surface outright, not merely nudge it by this tick's dy, or
+      // the accumulating fall wins and the rider drops through within a few ticks.
+      const topYBefore = prevY - c.sprite.height / 2;
+      const feetY = this.player.y + this.player.height / 2;
+      const wasOnTop = Math.abs(this.player.x - prevX) < c.sprite.width / 2 + 6 && feetY >= topYBefore - 6 && feetY <= topYBefore + 14;
+      const jumpingAway = this.player.body.velocity.y < 0;
+      if (wasOnTop && !jumpingAway) {
+        const topYAfter = next.y - c.sprite.height / 2;
+        this.player.setPosition(this.player.x + dx, topYAfter - this.player.height / 2);
+        this.player.body.setVelocityY(0);
+      }
+    }
+  }
+
+  private stepBouncePads(): void {
+    for (const pad of this.bouncePads) {
+      pad.cooldownS = Math.max(0, pad.cooldownS - 1 / 60);
+      if (pad.cooldownS > 0) continue;
+      if (!Phaser.Geom.Intersects.RectangleToRectangle(this.player.getBounds(), pad.sprite.getBounds())) continue;
+      if (this.player.body.velocity.y < 0) continue; // only launches a landing/standing Mowgli
+      const { vx, vy } = trunkLaunchVelocity(TRUNK_LAUNCH_RANGE_TILES, RISING_GRAVITY_PX_S2, JUMP_LAUNCH_SPEED_PX_S, TILE_PX);
+      this.player.body.setVelocity(this.facing * vx, vy);
+      pad.cooldownS = 1; // a second's grace so the same touch doesn't re-trigger every tick
+    }
+  }
+
+  /** Truce zone (GDD §10.5, S5 truce flag): every enemy within it is passive, and Mowgli's own
+   * throws drop at his feet with a soft "no" instead of flying. */
+  private isInTruceZone(x: number, y: number): boolean {
+    return this.truceZones.some((z) => x > z.x && x < z.x + z.w && y > z.y && y < z.y + z.h);
+  }
+
   // --- S7 Boss encounter (GDD §8.1-8.2) ----------------------------------------------------------
 
   private stepBossDoor(): void {
@@ -1091,10 +1380,11 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
-    this.bossState = stepBoss(this.bossState, dtS, B1_FLUNG_FESTOON, this.tierId);
-    const attack = currentAttack(this.bossState, B1_FLUNG_FESTOON);
+    this.bossState = stepBoss(this.bossState, dtS, this.bossData, this.tierId);
+    const attack = currentAttack(this.bossState, this.bossData);
     const hittable = isHittable(this.bossState);
-    this.updateBossHazard(attack, this.bossState.sub);
+    if (this.bossId === 'B2') this.updateBossHazardB2(attack, this.bossState.sub);
+    else this.updateBossHazardB1(attack, this.bossState.sub);
 
     this.bossHurtboxSprite.setVisible(hittable);
     this.bossHurtboxSprite.body.enable = hittable;
@@ -1102,7 +1392,7 @@ export class PlayScene extends Phaser.Scene {
     if (hittable) {
       for (const nut of [...this.nuts]) {
         if (Phaser.Geom.Intersects.RectangleToRectangle(nut.sprite.getBounds(), this.bossHurtboxSprite.getBounds())) {
-          this.bossState = registerHit(this.bossState, B1_FLUNG_FESTOON, this.tierId);
+          this.bossState = registerHit(this.bossState, this.bossData, this.tierId);
           this.destroyNut(nut.sprite);
           break;
         }
@@ -1113,7 +1403,7 @@ export class PlayScene extends Phaser.Scene {
   /** Phase-specific hazard shape (GDD §8.2): a rim nut rain, a festoon pendulum sweep reusing
    * the same pendulumKinematics traversal swings use, then an advancing line. Each reuses an S3
    * script's own math rather than inventing a fifth movement system (GDD §8.1). */
-  private updateBossHazard(attack: (typeof B1_FLUNG_FESTOON)['phases'][number]['attacks'][number], sub: BossAttackSub): void {
+  private updateBossHazardB1(attack: ReturnType<typeof currentAttack>, sub: BossAttackSub): void {
     if (!this.bossDoorZone || !this.bossHazardSprite || !this.bossHurtboxSprite) return;
     const anchorX = this.bossDoorZone.x;
     const anchorY = this.bossDoorZone.y + this.bossDoorZone.h - 20;
@@ -1163,6 +1453,99 @@ export class PlayScene extends Phaser.Scene {
           this.bossHazardSprite.body.enable = false;
         }
         this.bossHurtboxSprite.setPosition(anchorX - 40, anchorY);
+        break;
+      }
+    }
+  }
+
+  /** B2 The Lame One in the Ravine (GDD §8.3): Shere Khan lame-charges and roars in phase 1,
+   * pounces onto a boulder in phase 2, then swipes and drops falling rocks while cornered on
+   * Rama's back in phase 3. Each attack reuses an S3 script's own math, per the GDD's own rule
+   * (GDD §8.1), exactly like B1's hazards above. Tabaqui's living boulder-landing telegraph
+   * (GDD §8.3 beat 4) uses its own documented fallback here: a dust mark, not a running NPC
+   * (DECISIONS.md), since Tabaqui never otherwise appears past L1/B2's own arena. */
+  private updateBossHazardB2(attack: ReturnType<typeof currentAttack>, sub: BossAttackSub): void {
+    if (!this.bossDoorZone || !this.bossHazardSprite || !this.bossHurtboxSprite) return;
+    const anchorX = this.bossDoorZone.x;
+    const anchorY = this.bossDoorZone.y + this.bossDoorZone.h - 20;
+    this.bossHurtboxSprite.setPosition(anchorX, anchorY - 8);
+
+    switch (attack.id) {
+      case 'lameCharge': {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          const halfSpanPx = (B2_LAME_CHARGE_SPEED_PX_S * attack.activeS) / 2;
+          const t = Math.min(1, this.bossState.timerS / attack.activeS);
+          const x = Phaser.Math.Linear(anchorX + halfSpanPx, anchorX - halfSpanPx, t);
+          this.bossHazardSprite.setPosition(x, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(this.player.x < x ? -1 : 1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'roar': {
+        if (sub === 'active' && !this.bossPhaseFired) {
+          this.bossPhaseFired = true;
+          const pushDir = this.player.x < anchorX ? -1 : 1;
+          if (Math.abs(this.player.x - anchorX) < 100 && (this.player.body.touching.down || this.player.body.blocked.down)) {
+            this.player.body.setVelocityX(pushDir * -RUN_SPEED_PX_S * B2_ROAR_PUSH_TILES);
+          }
+        }
+        if (sub !== 'active') this.bossPhaseFired = false;
+        this.bossHazardSprite.setVisible(false);
+        this.bossHazardSprite.body.enable = false;
+        break;
+      }
+      case 'pounce': {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          const t = Math.min(1, this.bossState.timerS / attack.activeS);
+          const x = Phaser.Math.Linear(anchorX - B2_POUNCE_ARC_TILES * TILE_PX, anchorX, t);
+          const arcY = anchorY - Math.sin(t * Math.PI) * 24;
+          this.bossHazardSprite.setPosition(x, arcY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'swipe': {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          this.bossHazardSprite.setPosition(anchorX, anchorY - B2_SWIPE_HEIGHT_TILES * TILE_PX);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'fallingRock':
+      default: {
+        const lane = Math.floor(this.bossState.timerS / B2_FALLING_ROCK_INTERVAL_S) % B2_FALLING_ROCK_LANES;
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          this.bossHazardSprite.setPosition(anchorX - 40 + lane * 40, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
         break;
       }
     }
@@ -1274,8 +1657,9 @@ export class PlayScene extends Phaser.Scene {
       redFlowerLit: this.redFlower.lit,
       currentThrowable: this.throwableOrder[this.throwableIndex],
       throwableSlots: this.throwableOrder.length,
+      clodCount: this.clodCount,
       boss: this.bossActive
-        ? { phaseIndex: this.bossState.phaseIndex, phaseCount: B1_FLUNG_FESTOON.phases.length, hitsThisPhase: this.bossState.hitsThisPhase, hitsRequired: TIERS[this.tierId].bossHitsPerPhase, defeated: this.bossState.defeated }
+        ? { phaseIndex: this.bossState.phaseIndex, phaseCount: this.bossData.phases.length, hitsThisPhase: this.bossState.hitsThisPhase, hitsRequired: TIERS[this.tierId].bossHitsPerPhase, defeated: this.bossState.defeated }
         : null,
     };
   }

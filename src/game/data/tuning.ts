@@ -159,6 +159,42 @@ export const TURRET_HIDE_S = 8; // sinks into its hole after 2 nuts / 1 clod
 export const TURRET_HITS_TO_HIDE = 2;
 export const SNAKE_GATE_CALM_S = 10;
 
+// Dogs (Charger variant, GDD §7.7 #2): a lunge-charge sub-mode distinct from Tabaqui's steal
+export const DOG_LUNGE_RANGE_TILES = 6;
+export const DOG_LUNGE_SPEED_PX_S = 128;
+export const DOG_LUNGE_DURATION_S = 4 / (128 / 16); // "4 tiles at 128 px/s" = 0.5 s
+export const DOG_RECOVER_S = 0.8;
+
+// Quill-pig (Lobber variant, GDD §7.7 #4): patrols, straight shots at two heights
+export const QUILL_PIG_PATROL_SPEED_PX_S = 32;
+export const QUILL_PIG_PATROL_SPAN_TILES = 6;
+export const QUILL_PIG_TRIGGER_RANGE_TILES = 5;
+export const QUILL_PIG_TELEGRAPH_S = 0.6;
+export const QUILL_PIG_CYCLE_S = 2.5;
+export const QUILL_PIG_SHOT_SPEED_PX_S = 160;
+export const QUILL_PIG_LOW_HEIGHT_TILES = 0.5;
+export const QUILL_PIG_HIGH_HEIGHT_TILES = 1.5;
+
+// Zone 2 carry platforms (GDD §10.5-10.6, §7.3 table): Hathi's sons, buffalo and Rama
+export const HATHI_SON_SPEED_PX_S = 32;
+export const CARRY_WAIT_AT_MARKER_S = 2;
+export const TRUNK_LAUNCH_RANGE_TILES = 5;
+export const BUFFALO_SPEED_PX_S = 48;
+export const BUFFALO_ADVANCE_SPEED_PX_S = 96;
+export const BUFFALO_ADVANCE_DURATION_S = 2;
+export const RAMA_SPEED_PX_S = 48;
+
+// Truce zone (GDD §10.5, S5 truce flag): every enemy passive, throws drop at Mowgli's feet
+export const TRUCE_DROP_RANGE_PX = 16;
+
+// B2 The Lame One in the Ravine (GDD §8.3): Shere Khan
+export const B2_LAME_CHARGE_SPEED_PX_S = 160;
+export const B2_ROAR_PUSH_TILES = 2;
+export const B2_POUNCE_ARC_TILES = 6;
+export const B2_SWIPE_HEIGHT_TILES = 1.5;
+export const B2_FALLING_ROCK_INTERVAL_S = 4.0;
+export const B2_FALLING_ROCK_LANES = 3;
+
 // S7 BossMachine (GDD §8.1): recovery windows by tier, standard and heavy
 export const BOSS_RECOVERY_STANDARD_S_CUB = 1.0;
 export const BOSS_RECOVERY_STANDARD_S_WOLF = 0.6;

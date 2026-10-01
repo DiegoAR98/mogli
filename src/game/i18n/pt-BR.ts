@@ -44,6 +44,18 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
   'card.l2.birdGate': 'Nós somos do mesmo sangue, tu e eu',
   'card.l2.exit': 'Um coração corajoso e uma língua cortês. Eles te levarão longe pela selva, filhote de homem.',
 
+  'level.l3.title': 'Trégua da Água',
+  'card.l3.intro': 'O riacho secou, a poça não há, / Somos camaradas, tu e eu, já;',
+  'card.l3.twist': 'Pela Lei da Selva, é morte matar junto aos bebedouros depois que a Trégua da Água foi declarada.',
+  'card.l3.shereKhanPool': 'Shere Khan desce até a poça seca. Toda cabeça se volta para o outro lado.',
+  'card.l3.exit1': 'Sabei, filhotes, que de todas as coisas o que mais temeis é o Homem;',
+  'card.l3.exit2': 'Até que aquela nuvem--Boa Caçada!--solte / A chuva que quebra nossa Trégua da Água.',
+
+  'level.l4.title': 'Alcateia dos Homens',
+  'card.l4.intro': 'E então, caçador ousado? / Irmão, a vigília foi longa e fria.',
+  'card.l4.afterB2': 'Olhai bem, ó Lobos. Mantive minha palavra?',
+  'card.l4.act1': 'Sou dois Mowglis, mas a pele de Shere Khan está sob meus pés.',
+
   'hud.counter': 'achadas {count}/{quota}',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Encontre {name}',
@@ -51,6 +63,8 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
 
   'exit.akela': 'Akela',
   'exit.kaa': 'Kaa',
+  'exit.hathi': 'Hathi',
+  'exit.greyBrother': 'Grey Brother',
 
   'pause.title': 'Pausado',
   'pause.resume': 'Retomar',

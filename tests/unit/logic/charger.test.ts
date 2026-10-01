@@ -28,7 +28,7 @@ describe('Charger script (Tabaqui, jackals)', () => {
   });
 
   it('carries indefinitely until hit, then drops the stone and flees for CHARGER_FLEE_S', () => {
-    let state: ReturnType<typeof initialChargerState> = { phase: 'carrying', timerS: 0 };
+    let state: ReturnType<typeof initialChargerState> = { phase: 'carrying', timerS: 0, reason: null };
     let result = stepCharger(state, 5, { hitOrStomped: false, thief: true, stoneNearby: false, reachedStone: false });
     expect(result.state.phase).toBe('carrying');
 

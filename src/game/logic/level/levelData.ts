@@ -104,6 +104,9 @@ export interface TriggerDef {
   h: number;
   flag: string;
   textKey?: string;
+  /** A 'door' trigger's interact-hold kind (GDD §4.1): 'masterWordsGate' (0.5 s, the default)
+   * or 'hutDoor' (0.25 s, GDD §10.6). */
+  gateKind?: string;
 }
 
 export interface PlatformDef {
@@ -117,6 +120,19 @@ export interface PlatformDef {
   flags: string[];
   periodS?: number;
   waitS?: number;
+  /** Carry platforms only (GDD §10.5-10.6): waypoints beyond the object's own (x, y), as
+   * "x1,y1;x2,y2;...". The object's own position is always the first waypoint. */
+  waypoints?: Array<{ x: number; y: number }>;
+}
+
+/** A thorn fence (GDD §10.6, the "breakable tag"): a static obstacle that an advanceOnHit carry
+ * platform (a nut-struck buffalo) breaks through on contact while advancing. */
+export interface FenceDef {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface EnemyDef {
@@ -182,6 +198,7 @@ export interface LevelDefinition {
   pickups: PickupDef[];
   bossDoor: BossDoorDef | null;
   helpers: HelperDef[];
+  fences: FenceDef[];
   groundLayer: { width: number; height: number; data: number[] } | null;
   tileProperties: Map<number, GroundTileProperties>; // by gid
 }
@@ -245,6 +262,7 @@ const KNOWN_OBJECT_TYPES = new Set([
   'altar',
   'bossDoor',
   'card',
+  'fence',
 ]);
 
 export function parseLevel(map: TiledMap): LevelDefinition {
@@ -270,6 +288,7 @@ export function parseLevel(map: TiledMap): LevelDefinition {
     pickups: [],
     bossDoor: null,
     helpers: [],
+    fences: [],
     groundLayer: null,
     tileProperties: new Map(),
   };
@@ -338,6 +357,7 @@ export function parseLevel(map: TiledMap): LevelDefinition {
         case 'trigger': {
           const flag = String(requireProp(obj, 'flag'));
           const textKey = optionalProp(obj, 'textKey');
+          const gateKind = optionalProp(obj, 'gateKind');
           definition.triggers.push({
             id: obj.id,
             x: obj.x,
@@ -346,6 +366,7 @@ export function parseLevel(map: TiledMap): LevelDefinition {
             h: obj.height,
             flag,
             textKey: textKey === undefined ? undefined : String(textKey),
+            gateKind: gateKind === undefined ? undefined : String(gateKind),
           });
           break;
         }
@@ -357,6 +378,18 @@ export function parseLevel(map: TiledMap): LevelDefinition {
           const flags = flagsRaw === undefined ? [] : String(flagsRaw).split(',').map((f) => f.trim());
           const periodS = optionalProp(obj, 'periodS');
           const waitS = optionalProp(obj, 'waitS');
+          const waypointsRaw = optionalProp(obj, 'waypoints');
+          const waypoints =
+            waypointsRaw === undefined
+              ? undefined
+              : String(waypointsRaw)
+                  .split(';')
+                  .map((pair) => pair.trim())
+                  .filter((pair) => pair.length > 0)
+                  .map((pair) => {
+                    const [wx, wy] = pair.split(',').map(Number);
+                    return { x: wx, y: wy };
+                  });
           definition.platforms.push({
             id: obj.id,
             x: obj.x,
@@ -368,7 +401,13 @@ export function parseLevel(map: TiledMap): LevelDefinition {
             flags,
             periodS: periodS === undefined ? undefined : Number(periodS),
             waitS: waitS === undefined ? undefined : Number(waitS),
+            waypoints,
           });
+          break;
+        }
+
+        case 'fence': {
+          definition.fences.push({ id: obj.id, x: obj.x, y: obj.y, w: obj.width, h: obj.height });
           break;
         }
 

@@ -6,7 +6,7 @@ import type { Settings } from '../systems/settings';
 import { QUOTA_SILHOUETTE_S, QUOTA_TOAST_S, RED_FLOWER_CAP_S } from '../data/tuning';
 import type { DictKey } from '../i18n/en';
 
-const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa' };
+const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa', hathi: 'exit.hathi', greyBrother: 'exit.greyBrother' };
 
 /**
  * Parallel scene (PLAN.md §3.2 rule 3): reads PlayScene's read-only accessors, the registry and

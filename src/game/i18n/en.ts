@@ -43,6 +43,18 @@ export const en = {
   'card.l2.birdGate': 'We be of one blood, ye and I',
   'card.l2.exit': 'A brave heart and a courteous tongue. They shall carry thee far through the jungle, manling.',
 
+  'level.l3.title': 'Water Truce',
+  'card.l3.intro': 'The stream is shrunk--the pool is dry, / And we be comrades, thou and I;',
+  'card.l3.twist': 'By the Law of the Jungle it is death to kill at the drinking-places when once the Water Truce has been declared.',
+  'card.l3.shereKhanPool': 'Shere Khan comes down to the shrunken pool. Every head turns away.',
+  'card.l3.exit1': 'Ye know, children, that of all things ye most fear Man;',
+  'card.l3.exit2': "Till yonder cloud--Good Hunting!--loose / The rain that breaks our Water Truce.",
+
+  'level.l4.title': 'Man-Pack',
+  'card.l4.intro': 'What of the hunting, hunter bold? / Brother, the watch was long and cold.',
+  'card.l4.afterB2': 'Look well, O Wolves. Have I kept my word?',
+  'card.l4.act1': 'I am two Mowglis, but the hide of Shere Khan is under my feet.',
+
   'hud.counter': 'found {count}/{quota}',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Find {name}',
@@ -50,6 +62,8 @@ export const en = {
 
   'exit.akela': 'Akela',
   'exit.kaa': 'Kaa',
+  'exit.hathi': 'Hathi',
+  'exit.greyBrother': 'Grey Brother',
 
   'pause.title': 'Paused',
   'pause.resume': 'Resume',
