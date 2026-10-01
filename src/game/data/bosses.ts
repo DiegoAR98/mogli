@@ -56,3 +56,31 @@ export const B2_LAME_ONE: BossData = {
     },
   ],
 };
+
+/** B3 Thuu, the White Hood (GDD §8.4): the White Cobra of the vault. */
+export const B3_THUU: BossData = {
+  id: 'B3',
+  phases: [
+    {
+      id: 'strikeAndSweep',
+      attacks: [
+        { id: 'strike', windUpS: 0.6, activeS: 0.3, recoveryS: STANDARD_RECOVERY_S },
+        { id: 'coilSweep', windUpS: 0.8, activeS: 0.5, recoveryS: STANDARD_RECOVERY_S },
+      ],
+    },
+    {
+      id: 'treasureToss',
+      attacks: [
+        { id: 'treasureToss', windUpS: 1.0, activeS: 0.8, recoveryS: HEAVY_RECOVERY_S },
+        { id: 'strike', windUpS: 0.5, activeS: 0.3, recoveryS: STANDARD_RECOVERY_S },
+      ],
+    },
+    {
+      id: 'doubleStrike',
+      attacks: [
+        { id: 'doubleStrike', windUpS: 0.9, activeS: 0.9, recoveryS: HEAVY_RECOVERY_S },
+        { id: 'coinDust', windUpS: 0.7, activeS: 0.6, recoveryS: STANDARD_RECOVERY_S },
+      ],
+    },
+  ],
+};

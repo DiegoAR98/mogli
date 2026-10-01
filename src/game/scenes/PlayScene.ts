@@ -23,24 +23,31 @@ import {
   initialLobberState,
   initialChargerState,
   initialTurretState,
+  initialBuldeoState,
   stepLobber,
   stepCharger,
   stepTurret,
+  stepBuldeo as stepBuldeoScript,
   stompScatters,
   turretIsStompable,
   type LobberState,
   type ChargerState,
   type TurretState,
+  type BuldeoState,
 } from '../logic/enemies/scripts';
 import {
   carryPosition,
   crumbleHasCollision,
+  headLiftHeightFraction,
+  initialHeadLiftState,
   pendulumKinematics,
   startCrumble,
   stepCrumble,
+  stepHeadLift,
   swingReleaseVx,
   trunkLaunchVelocity,
   type CrumbleState,
+  type HeadLiftState,
   type Waypoint,
 } from '../logic/platforms/PathFollower';
 import { initialRedFlowerState, isWithinFleeRadius, pickUpPot, tickRedFlower, toggleRedFlower, type RedFlowerState } from '../logic/items/RedFlower';
@@ -48,7 +55,7 @@ import { activateBeckon, checkQuota, initialExitNpcState, initialQuotaState, tou
 import { applyHit, canBeHit, isBlinkVisible } from '../logic/player/hitResponse';
 import { tickCountUp, isCountUpComplete } from '../logic/player/frameCounter';
 import { currentAttack, initialBossState, isHittable, registerHit, stepBoss, type BossAttackSub, type BossData, type BossMachineState } from '../logic/boss/BossMachine';
-import { B1_FLUNG_FESTOON, B2_LAME_ONE } from '../data/bosses';
+import { B1_FLUNG_FESTOON, B2_LAME_ONE, B3_THUU } from '../data/bosses';
 import { TIERS, type TierId } from '../data/tiers';
 import type { Settings } from '../systems/settings';
 import { Translator } from '../systems/locale';
@@ -61,9 +68,21 @@ import {
   B2_POUNCE_ARC_TILES,
   B2_ROAR_PUSH_TILES,
   B2_SWIPE_HEIGHT_TILES,
+  B3_STRIKE_HEIGHT_TILES,
+  B3_STRIKE_REACH_TILES,
+  B3_TREASURE_TOSS_SPOTS,
   BODY_STANDING_H_PX,
   BODY_STANDING_W_PX,
   BUFFALO_ADVANCE_SPEED_PX_S,
+  BULDEO_CHASE_SPEED_PX_S,
+  BULDEO_DETECT_HEIGHT_TILES,
+  BULDEO_DETECT_WIDTH_TILES,
+  BULDEO_ROUTE_SPEED_PX_S,
+  HEAD_LIFT_HOLD_FRAMES,
+  HEAD_LIFT_LOWER_S,
+  HEAD_LIFT_RISE_S,
+  HEAD_LIFT_RISE_TILES,
+  HEAD_LIFT_WAIT_AT_TOP_S,
   CARRY_WAIT_AT_MARKER_S,
   CHARGER_PATROL_SPEED_PX_S,
   CLIMB_SPEED_PX_S,
@@ -128,6 +147,15 @@ interface EnemyRuntime {
   truced: boolean;
 }
 
+/** Buldeo (GDD §7.7, §10.7): not an enemy entry, takes no hits, never stomped or scared. */
+interface BuldeoRuntime {
+  sprite: Rect;
+  state: BuldeoState;
+  patrolLeft: number;
+  patrolRight: number;
+  direction: -1 | 1;
+}
+
 interface NutRuntime {
   sprite: Rect;
   spawnX: number;
@@ -174,6 +202,13 @@ export class PlayScene extends Phaser.Scene {
   private enemyNuts: Rect[] = [];
 
   private enemies: EnemyRuntime[] = [];
+  private buldeo: BuldeoRuntime | null = null;
+  private tallGrassZones: Array<{ x: number; y: number; w: number; h: number }> = [];
+  private ropes: Array<{ sprite: Rect; x: number; y: number; index: number; holdFrames: number; cut: boolean }> = [];
+  private followers: Array<{ sprite: Rect; index: number; active: boolean }> = [];
+  private altarSprite?: Rect;
+  private pouchCount = 0;
+  private headLifts: Array<{ sprite: Rect; baseX: number; baseY: number; state: HeadLiftState; holdFrames: number }> = [];
 
   private redFlower: RedFlowerState = initialRedFlowerState();
   private redFlowerPickups: Array<{ sprite: Phaser.GameObjects.Rectangle; claimed: boolean }> = [];
@@ -219,6 +254,7 @@ export class PlayScene extends Phaser.Scene {
   private bossHazardSprite?: Rect;
   private bossPhaseFired = false;
   private bossGates: Array<{ sprite: Rect; opened: boolean }> = [];
+  private altarGates: Array<{ sprite: Rect; opened: boolean }> = [];
   private bossHelpers: Array<{ sprite: Rect; kind: string; holdFrames: number; held: boolean }> = [];
 
   private simTimeS = 0;
@@ -250,6 +286,9 @@ export class PlayScene extends Phaser.Scene {
     this.buildExit();
     this.buildBossDoor();
     this.buildHelpers();
+    this.buildRopesAndFollowers();
+    this.buildAltar();
+    this.buildHeadLifts();
 
     this.checkpoint = activateCheckpoint({ checkpointId: 'spawn', x: this.level.spawn.x, y: this.level.spawn.y, spawnFacing: this.level.spawn.facing });
 
@@ -333,6 +372,13 @@ export class PlayScene extends Phaser.Scene {
         this.bossGates.push({ sprite, opened: false });
       } else if (t.flag === 'truce') {
         this.truceZones.push({ x: t.x, y: t.y, w: t.w, h: t.h });
+      } else if (t.flag === 'tallGrass') {
+        this.tallGrassZones.push({ x: t.x, y: t.y, w: t.w, h: t.h });
+      } else if (t.flag === 'altarGate') {
+        const sprite = this.add.rectangle(t.x + t.w / 2, t.y + t.h / 2, t.w, t.h, 0x3a2a6a) as Rect;
+        this.physics.add.existing(sprite, true);
+        this.physics.add.collider(this.player, sprite);
+        this.altarGates.push({ sprite, opened: false });
       }
     }
     for (const fence of this.level.fences) {
@@ -385,6 +431,20 @@ export class PlayScene extends Phaser.Scene {
 
   private buildEnemies(): void {
     for (const enemyDef of this.level.enemies) {
+      if (enemyDef.script === 'buldeo') {
+        const sprite = this.add.rectangle(enemyDef.x, enemyDef.y - 6, 12, 14, 0xd8a657) as Rect;
+        this.physics.add.existing(sprite);
+        sprite.body.setCollideWorldBounds(false);
+        this.physics.add.collider(sprite, this.groundLayer);
+        this.buldeo = {
+          sprite,
+          state: initialBuldeoState(),
+          patrolLeft: enemyDef.patrolLeft,
+          patrolRight: enemyDef.patrolRight,
+          direction: enemyDef.facing,
+        };
+        continue;
+      }
       const sprite = this.add.rectangle(enemyDef.x, enemyDef.y - 6, 10, 12, 0xb84a4a) as Rect;
       this.physics.add.existing(sprite);
       sprite.body.setCollideWorldBounds(false);
@@ -436,7 +496,7 @@ export class PlayScene extends Phaser.Scene {
     const bd = this.level.bossDoor;
     this.bossDoorZone = { x: bd.x, y: bd.y, w: bd.w, h: bd.h };
     this.bossId = bd.bossId;
-    this.bossData = bd.bossId === 'B2' ? B2_LAME_ONE : B1_FLUNG_FESTOON;
+    this.bossData = bd.bossId === 'B2' ? B2_LAME_ONE : bd.bossId === 'B3' ? B3_THUU : B1_FLUNG_FESTOON;
 
     const hurtbox = this.add.rectangle(bd.x, bd.y + bd.h - 20, 14, 14, 0x8a4a8a) as Rect;
     this.physics.add.existing(hurtbox, true);
@@ -456,6 +516,40 @@ export class PlayScene extends Phaser.Scene {
       const sprite = this.add.rectangle(h.x, h.y - 8, 10, 16, 0x333333) as Rect;
       this.physics.add.existing(sprite, true);
       this.bossHelpers.push({ sprite, kind: h.kind, holdFrames: 0, held: false });
+    }
+  }
+
+  /** Rope cutting and the escort followers (GDD §10.7): a 0.8 s crouch-hold cuts the rope of the
+   * same index, freeing the follower it ties up. A follower stays put and invisible until freed. */
+  private buildRopesAndFollowers(): void {
+    for (const r of this.level.ropes) {
+      const sprite = this.add.rectangle(r.x, r.y - 8, 8, 16, 0x8a6a3a) as Rect;
+      this.physics.add.existing(sprite, true);
+      this.ropes.push({ sprite, x: r.x, y: r.y, index: r.index, holdFrames: 0, cut: false });
+    }
+    for (const f of this.level.followers) {
+      const sprite = this.add.rectangle(f.x, f.y - 8, 10, 16, 0xc9a0d8) as Rect;
+      sprite.setVisible(false);
+      this.followers.push({ sprite, index: f.index, active: false });
+    }
+  }
+
+  private buildAltar(): void {
+    if (!this.level.altar) return;
+    const sprite = this.add.rectangle(this.level.altar.x, this.level.altar.y - 8, 14, 16, 0xf2e94e) as Rect;
+    this.physics.add.existing(sprite, true);
+    this.altarSprite = sprite;
+  }
+
+  /** Kaa's head-lift (GDD §10.8): stand 0.6 s, it rises 4 tiles, waits 2 s, lowers. */
+  private buildHeadLifts(): void {
+    for (const h of this.level.headLifts) {
+      const sprite = this.add.rectangle(h.x, h.y, 3 * TILE_PX, TILE_PX, 0x5a8ab0) as Rect;
+      this.physics.add.existing(sprite);
+      sprite.body.setAllowGravity(false);
+      sprite.body.setImmovable(true);
+      this.physics.add.collider(this.player, sprite);
+      this.headLifts.push({ sprite, baseX: h.x, baseY: h.y, state: initialHeadLiftState(), holdFrames: 0 });
     }
   }
 
@@ -490,9 +584,15 @@ export class PlayScene extends Phaser.Scene {
     this.stepCrumblePlatforms();
     this.stepCarryPlatforms(dtS);
     this.stepBouncePads();
+    this.stepHeadLifts(dtS, snapshot);
     this.stepBossDoor();
     this.stepBossFight(dtS, snapshot);
     this.stepBossGates();
+    this.stepBuldeo(dtS);
+    this.stepRopes(snapshot);
+    this.stepFollowers();
+    this.stepAltar();
+    this.stepAltarGates();
     this.stepQuotaAndExit();
     this.stepIframes();
   }
@@ -671,9 +771,14 @@ export class PlayScene extends Phaser.Scene {
       const dy = sprite.y - this.player.y;
       if (Math.abs(dx) < 10 && Math.abs(dy) < 14) {
         this.stoneStates[i] = collectStone(this.stoneStates[i]);
-        this.stonesCollected++;
         sprite.setVisible(false);
-        gameEvents.emit('stones:collected', { count: this.stonesCollected, total: this.level.stones.length, index: i, kind: 'moon' });
+        if (this.level.stones[i].skin === 'jewel') {
+          // The inverted quota (GDD §9.3): a jewel goes into the pouch, not straight to the count.
+          this.pouchCount++;
+        } else {
+          this.stonesCollected++;
+        }
+        gameEvents.emit('stones:collected', { count: this.stonesCollected, total: this.level.stones.length, index: i, kind: this.level.stones[i].skin === 'jewel' ? 'jewel' : 'moon' });
       }
     }
   }
@@ -1356,6 +1461,36 @@ export class PlayScene extends Phaser.Scene {
     return this.truceZones.some((z) => x > z.x && x < z.x + z.w && y > z.y && y < z.y + z.h);
   }
 
+  /** Kaa's head-lift (GDD §10.8): a 0.6 s crouch-hold starts the rise; riding it reuses the same
+   * geometric on-top pin stepCarryPlatforms uses, for the same reason (D96j/D96b): Arcade's own
+   * touching/blocked flags desync from a body repositioned by hand every tick. */
+  private stepHeadLifts(dtS: number, snapshot: InputSnapshot): void {
+    for (const lift of this.headLifts) {
+      const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, lift.sprite.x, lift.baseY) < GATE_INTERACT_RANGE_PX;
+      const holding = lift.state.phase === 'idle' && near && snapshot.held.down;
+      lift.holdFrames = tickCountUp(lift.holdFrames, holding, HEAD_LIFT_HOLD_FRAMES);
+      const holdComplete = isCountUpComplete(lift.holdFrames, HEAD_LIFT_HOLD_FRAMES);
+      if (holdComplete) lift.holdFrames = 0;
+
+      const prevY = lift.sprite.y;
+      lift.state = stepHeadLift(lift.state, dtS, holdComplete, HEAD_LIFT_RISE_S, HEAD_LIFT_WAIT_AT_TOP_S, HEAD_LIFT_LOWER_S);
+      const fraction = headLiftHeightFraction(lift.state, HEAD_LIFT_RISE_S, HEAD_LIFT_LOWER_S);
+      const nextY = lift.baseY - fraction * HEAD_LIFT_RISE_TILES * TILE_PX;
+      lift.sprite.body.reset(lift.baseX, nextY);
+      const dy = nextY - prevY;
+      if (dy === 0) continue;
+
+      const topY = nextY - lift.sprite.height / 2;
+      const prevTopY = prevY - lift.sprite.height / 2;
+      const feetY = this.player.y + this.player.height / 2;
+      const wasOnTop = Math.abs(this.player.x - lift.baseX) < lift.sprite.width / 2 + 6 && feetY >= prevTopY - 6 && feetY <= prevTopY + 14;
+      if (wasOnTop && this.player.body.velocity.y >= 0) {
+        this.player.setPosition(this.player.x, topY - this.player.height / 2);
+        this.player.body.setVelocityY(0);
+      }
+    }
+  }
+
   // --- S7 Boss encounter (GDD §8.1-8.2) ----------------------------------------------------------
 
   private stepBossDoor(): void {
@@ -1384,6 +1519,7 @@ export class PlayScene extends Phaser.Scene {
     const attack = currentAttack(this.bossState, this.bossData);
     const hittable = isHittable(this.bossState);
     if (this.bossId === 'B2') this.updateBossHazardB2(attack, this.bossState.sub);
+    else if (this.bossId === 'B3') this.updateBossHazardB3(attack, this.bossState.sub);
     else this.updateBossHazardB1(attack, this.bossState.sub);
 
     this.bossHurtboxSprite.setVisible(hittable);
@@ -1551,6 +1687,98 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
+  /** B3 Thuu, the White Hood (GDD §8.4): strikes at the player, a coil sweep, a treasure toss on
+   * marked spots, a double strike, and a slow coin-dust arc. Every attack reuses an S3 script's
+   * own math, per the GDD's own rule (GDD §8.1), exactly like B1/B2's hazards above. Thuu's
+   * "strike aimed at where Mowgli stood 0.6 s ago" is simplified to the player's position at the
+   * moment the strike lands (the active sub starts), not a tracked position-history buffer. */
+  private updateBossHazardB3(attack: ReturnType<typeof currentAttack>, sub: BossAttackSub): void {
+    if (!this.bossDoorZone || !this.bossHazardSprite || !this.bossHurtboxSprite) return;
+    const anchorX = this.bossDoorZone.x;
+    const anchorY = this.bossDoorZone.y + this.bossDoorZone.h - 20;
+    this.bossHurtboxSprite.setPosition(anchorX, anchorY - 8);
+
+    switch (attack.id) {
+      case 'strike': {
+        if (sub === 'active') {
+          if (!this.bossPhaseFired) {
+            this.bossPhaseFired = true;
+            this.bossHazardSprite.setVisible(true);
+            this.bossHazardSprite.body.enable = true;
+            const dir = this.player.x < anchorX ? -1 : 1;
+            this.bossHazardSprite.setPosition(this.player.x, anchorY - B3_STRIKE_HEIGHT_TILES * TILE_PX);
+            if (Math.abs(this.player.x - anchorX) <= B3_STRIKE_REACH_TILES * TILE_PX) this.applyHitToPlayer(dir);
+          }
+        } else {
+          this.bossPhaseFired = false;
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'coilSweep': {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          this.bossHazardSprite.setPosition(anchorX, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds()) && (this.player.body.touching.down || this.player.body.blocked.down)) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'treasureToss': {
+        const spot = Math.floor(this.bossState.timerS / (attack.activeS / B3_TREASURE_TOSS_SPOTS)) % B3_TREASURE_TOSS_SPOTS;
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          this.bossHazardSprite.setPosition(anchorX - 40 + spot * 40, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'doubleStrike': {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          this.bossHazardSprite.setPosition(this.player.x, anchorY - B3_STRIKE_HEIGHT_TILES * TILE_PX);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(this.player.x < anchorX ? -1 : 1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+      case 'coinDust':
+      default: {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          const t = Math.min(1, this.bossState.timerS / attack.activeS);
+          const x = Phaser.Math.Linear(anchorX + 50, anchorX - 50, t);
+          this.bossHazardSprite.setPosition(x, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+    }
+  }
+
   private spawnBossNut(x: number, y: number): void {
     const dir = x < this.player.x ? 1 : -1;
     const sprite = this.add.rectangle(x, y, 4, 4, 0xb84a4a) as Rect;
@@ -1590,6 +1818,107 @@ export class PlayScene extends Phaser.Scene {
   private stepBossGates(): void {
     if (this.bossGates.length === 0 || !this.bossVictoryComplete()) return;
     for (const gate of this.bossGates) {
+      if (gate.opened) continue;
+      gate.opened = true;
+      gate.sprite.setVisible(false);
+      gate.sprite.body.enable = false;
+    }
+  }
+
+  /** Buldeo (GDD §7.7, §10.7): a pursuit hazard with no stealth system, not an enemy entry --
+   * he takes no hits, is never stomped or scared, and this is his own small state machine. */
+  private stepBuldeo(dtS: number): void {
+    if (!this.buldeo) return;
+    const b = this.buldeo;
+    const body = b.sprite.body;
+
+    const inTallGrass = this.tallGrassZones.some((z) => this.player.x > z.x && this.player.x < z.x + z.w && this.player.y > z.y && this.player.y < z.y + z.h);
+    const detectX = b.direction === 1 ? b.sprite.x : b.sprite.x - BULDEO_DETECT_WIDTH_TILES * TILE_PX;
+    const detectRect = {
+      x: detectX,
+      y: b.sprite.y - BULDEO_DETECT_HEIGHT_TILES * TILE_PX,
+      width: BULDEO_DETECT_WIDTH_TILES * TILE_PX,
+      height: BULDEO_DETECT_HEIGHT_TILES * TILE_PX,
+    };
+    const playerInDetectZone = !inTallGrass && Phaser.Geom.Intersects.RectangleToRectangle(detectRect as Phaser.Geom.Rectangle, this.player.getBounds());
+
+    b.state = stepBuldeoScript(b.state, dtS, { playerInDetectZone });
+
+    switch (b.state.phase) {
+      case 'patrol':
+        body.setVelocityX(b.direction * BULDEO_ROUTE_SPEED_PX_S);
+        if (b.sprite.x <= b.patrolLeft) b.direction = 1;
+        if (b.sprite.x >= b.patrolRight) b.direction = -1;
+        break;
+      case 'detecting':
+        body.setVelocityX(0);
+        break;
+      case 'chasing': {
+        const chaseDir: -1 | 1 = this.player.x < b.sprite.x ? -1 : 1;
+        body.setVelocityX(chaseDir * BULDEO_CHASE_SPEED_PX_S);
+        b.direction = chaseDir;
+        if (Phaser.Geom.Intersects.RectangleToRectangle(b.sprite.getBounds(), this.player.getBounds())) {
+          this.applyHitToPlayer(chaseDir);
+        }
+        break;
+      }
+      case 'boasting':
+        body.setVelocityX(0);
+        break;
+    }
+
+    const tint = b.state.phase === 'detecting' ? 0xf2e94e : b.state.phase === 'chasing' ? 0xb84a4a : 0xd8a657;
+    b.sprite.setFillStyle(tint);
+  }
+
+  /** Rope cutting (GDD §10.7): a 0.8 s crouch-hold frees the follower of the same index. */
+  private stepRopes(snapshot: InputSnapshot): void {
+    for (const rope of this.ropes) {
+      if (rope.cut) continue;
+      const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, rope.x, rope.y) < GATE_INTERACT_RANGE_PX;
+      const holding = near && snapshot.held.down;
+      rope.holdFrames = tickCountUp(rope.holdFrames, holding, interactRequirementFrames('rope'));
+      if (isCountUpComplete(rope.holdFrames, interactRequirementFrames('rope'))) {
+        rope.cut = true;
+        rope.sprite.setVisible(false);
+        const follower = this.followers.find((f) => f.index === rope.index);
+        if (follower) {
+          follower.active = true;
+          follower.sprite.setVisible(true);
+        }
+      }
+    }
+  }
+
+  /** Escort followers (GDD §10.7, Messua and her husband): collision-free, trailing the player
+   * at a fixed offset once freed (the GDD's own documented fallback for a pathfinding follower). */
+  private stepFollowers(): void {
+    for (const follower of this.followers) {
+      if (!follower.active) continue;
+      const targetX = this.player.x - follower.index * 18 - 16;
+      const targetY = this.player.y;
+      const newX = Phaser.Math.Linear(follower.sprite.x, targetX, 0.08);
+      const newY = Phaser.Math.Linear(follower.sprite.y, targetY, 0.08);
+      follower.sprite.setPosition(newX, newY);
+    }
+  }
+
+  /** L6's inverted quota (GDD §9.3): a jewel goes into the pouch on pickup and only banks at the
+   * altar. Reuses the existing QuotaState machinery unchanged -- `stonesCollected` already is the
+   * banked count once this step is wired in, so checkQuota/the HUD/the exit all just work. */
+  private stepAltar(): void {
+    if (!this.altarSprite || this.pouchCount === 0) return;
+    if (!Phaser.Geom.Intersects.RectangleToRectangle(this.player.getBounds(), this.altarSprite.getBounds())) return;
+    this.stonesCollected += this.pouchCount;
+    this.pouchCount = 0;
+    gameEvents.emit('stones:collected', { count: this.stonesCollected, total: this.level.stones.length, index: -1, kind: 'jewel' });
+  }
+
+  /** Thuu's gate (GDD §10.8): opens once the (banked) quota is met -- a plain progression gate,
+   * not tied to any boss fight. */
+  private stepAltarGates(): void {
+    if (this.altarGates.length === 0 || !this.quota.met) return;
+    for (const gate of this.altarGates) {
       if (gate.opened) continue;
       gate.opened = true;
       gate.sprite.setVisible(false);
@@ -1658,6 +1987,8 @@ export class PlayScene extends Phaser.Scene {
       currentThrowable: this.throwableOrder[this.throwableIndex],
       throwableSlots: this.throwableOrder.length,
       clodCount: this.clodCount,
+      pouchCount: this.pouchCount,
+      invertedQuota: this.level.altar !== null,
       boss: this.bossActive
         ? { phaseIndex: this.bossState.phaseIndex, phaseCount: this.bossData.phases.length, hitsThisPhase: this.bossState.hitsThisPhase, hitsRequired: TIERS[this.tierId].bossHitsPerPhase, defeated: this.bossState.defeated }
         : null,

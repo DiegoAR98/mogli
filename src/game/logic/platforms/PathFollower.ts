@@ -144,6 +144,56 @@ export function carryPosition(waypoints: Waypoint[], speedPxS: number, waitS: nu
   return { x: last.x, y: last.y, vx: 0, vy: 0, waiting: true };
 }
 
+// --- Kaa's head-lift (GDD §10.8): stand 0.6 s, it rises, waits, lowers ------------------------
+
+export type HeadLiftPhase = 'idle' | 'rising' | 'atTop' | 'lowering';
+
+export interface HeadLiftState {
+  phase: HeadLiftPhase;
+  timerS: number;
+}
+
+export function initialHeadLiftState(): HeadLiftState {
+  return { phase: 'idle', timerS: 0 };
+}
+
+export function stepHeadLift(state: HeadLiftState, dtS: number, holdComplete: boolean, riseS: number, waitAtTopS: number, lowerS: number): HeadLiftState {
+  const timerS = state.timerS + dtS;
+
+  switch (state.phase) {
+    case 'idle':
+      if (holdComplete) return { phase: 'rising', timerS: 0 };
+      return { phase: 'idle', timerS: 0 };
+
+    case 'rising':
+      if (timerS >= riseS) return { phase: 'atTop', timerS: 0 };
+      return { phase: 'rising', timerS };
+
+    case 'atTop':
+      if (timerS >= waitAtTopS) return { phase: 'lowering', timerS: 0 };
+      return { phase: 'atTop', timerS };
+
+    case 'lowering':
+    default:
+      if (timerS >= lowerS) return { phase: 'idle', timerS: 0 };
+      return { phase: 'lowering', timerS };
+  }
+}
+
+/** 0 at the bottom, 1 at the top -- the fraction of the lift's rise height to draw/position at. */
+export function headLiftHeightFraction(state: HeadLiftState, riseS: number, lowerS: number): number {
+  switch (state.phase) {
+    case 'idle':
+      return 0;
+    case 'rising':
+      return Math.min(1, state.timerS / riseS);
+    case 'atTop':
+      return 1;
+    case 'lowering':
+      return 1 - Math.min(1, state.timerS / lowerS);
+  }
+}
+
 // --- Bounce flag: the trunk launch (GDD §10.5) -------------------------------------------------
 
 /** Launch velocity reaching rangeTiles horizontally under the player's own jump gravity,

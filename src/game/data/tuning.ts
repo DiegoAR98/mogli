@@ -187,6 +187,39 @@ export const RAMA_SPEED_PX_S = 48;
 // Truce zone (GDD §10.5, S5 truce flag): every enemy passive, throws drop at Mowgli's feet
 export const TRUCE_DROP_RANGE_PX = 16;
 
+// Buldeo (GDD §7.7 "he takes no hits and is not an enemy entry"; §10.7 L5): a pursuit hazard,
+// the Charger script's own pursue sub-mode (a bounded extension scoped to Buldeo only)
+export const BULDEO_ROUTE_SPEED_PX_S = 48;
+export const BULDEO_DETECT_WIDTH_TILES = 6;
+export const BULDEO_DETECT_HEIGHT_TILES = 2;
+export const BULDEO_DETECT_GRACE_S = 0.5;
+export const BULDEO_CHASE_SPEED_PX_S = 80;
+export const BULDEO_CHASE_DURATION_S = 6;
+export const BULDEO_PUSH_TILES = 2;
+export const BULDEO_BOAST_S = 3;
+
+// Rope cutting (GDD §10.7): crouch-hold 0.8 s, reusing the interact-hold system
+// (INTERACT_ROPE_FRAMES already existed since M1, declared for exactly this day)
+
+// Kaa's coils and head-lift (GDD §10.8, L6): sine-eased carry platform (approximated here as
+// the same linear carryPosition every other carry platform uses, a documented simplification)
+export const KAA_COIL_SPEED_PX_S = 48;
+export const KAA_COIL_PERIOD_S = 4;
+export const HEAD_LIFT_HOLD_FRAMES = 36; // 0.6 s
+export const HEAD_LIFT_RISE_TILES = 4;
+export const HEAD_LIFT_RISE_S = 1.5;
+export const HEAD_LIFT_WAIT_AT_TOP_S = 2;
+export const HEAD_LIFT_LOWER_S = 1.5;
+
+// L6 King's Treasure inverted quota (GDD §9.3): jewels bank at the altar, not on pickup
+
+// B3 Thuu, the White Hood (GDD §8.4)
+export const B3_STRIKE_REACH_TILES = 2;
+export const B3_STRIKE_HEIGHT_TILES = 1.5;
+export const B3_COIL_SWEEP_RANGE_TILES = 8;
+export const B3_TREASURE_TOSS_SPOTS = 3;
+export const B3_COIN_DUST_SPEED_PX_S = 120;
+
 // B2 The Lame One in the Ravine (GDD §8.3): Shere Khan
 export const B2_LAME_CHARGE_SPEED_PX_S = 160;
 export const B2_ROAR_PUSH_TILES = 2;

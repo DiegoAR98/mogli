@@ -144,7 +144,31 @@ export interface EnemyDef {
   patrolRight: number;
   facing: -1 | 1;
   flags: string[];
-  script: 'lobber' | 'charger' | 'turret';
+  script: 'lobber' | 'charger' | 'turret' | 'buldeo';
+}
+
+/** A rope to cut (GDD §10.7): a 0.8 s crouch-hold that frees the follower of the same index. */
+export interface RopeDef {
+  id: number;
+  x: number;
+  y: number;
+  index: number;
+}
+
+/** An escort follower (GDD §10.7, Messua and her husband): collision-free, freed by cutting the
+ * rope of the same index, then trails the player to the level's exit. */
+export interface FollowerDef {
+  id: number;
+  x: number;
+  y: number;
+  index: number;
+}
+
+/** Kaa's head-lift (GDD §10.8): stand 0.6 s, it rises, waits, lowers. */
+export interface HeadLiftDef {
+  id: number;
+  x: number;
+  y: number;
 }
 
 export interface ExitDef {
@@ -199,6 +223,10 @@ export interface LevelDefinition {
   bossDoor: BossDoorDef | null;
   helpers: HelperDef[];
   fences: FenceDef[];
+  ropes: RopeDef[];
+  followers: FollowerDef[];
+  headLifts: HeadLiftDef[];
+  altar: { id: number; x: number; y: number } | null;
   groundLayer: { width: number; height: number; data: number[] } | null;
   tileProperties: Map<number, GroundTileProperties>; // by gid
 }
@@ -263,6 +291,9 @@ const KNOWN_OBJECT_TYPES = new Set([
   'bossDoor',
   'card',
   'fence',
+  'rope',
+  'follower',
+  'headLift',
 ]);
 
 export function parseLevel(map: TiledMap): LevelDefinition {
@@ -289,6 +320,10 @@ export function parseLevel(map: TiledMap): LevelDefinition {
     bossDoor: null,
     helpers: [],
     fences: [],
+    ropes: [],
+    followers: [],
+    headLifts: [],
+    altar: null,
     groundLayer: null,
     tileProperties: new Map(),
   };
@@ -420,7 +455,7 @@ export function parseLevel(map: TiledMap): LevelDefinition {
           const flags = flagsRaw === undefined ? [] : String(flagsRaw).split(',').map((f) => f.trim());
           const scriptRaw = optionalProp(obj, 'script');
           const script = scriptRaw === undefined ? 'lobber' : (String(scriptRaw) as EnemyDef['script']);
-          if (script !== 'lobber' && script !== 'charger' && script !== 'turret') {
+          if (script !== 'lobber' && script !== 'charger' && script !== 'turret' && script !== 'buldeo') {
             throw new LevelValidationError(`Object ${obj.id} (enemy) has unknown script "${script}"`);
           }
           definition.enemies.push({ id: obj.id, x: obj.x, y: obj.y, entry, patrolLeft, patrolRight, facing, flags, script });
@@ -451,7 +486,29 @@ export function parseLevel(map: TiledMap): LevelDefinition {
           break;
         }
 
-        // bunch, pile, altar, card: parsed by later milestones
+        case 'rope': {
+          const index = Number(requireProp(obj, 'index'));
+          definition.ropes.push({ id: obj.id, x: obj.x, y: obj.y, index });
+          break;
+        }
+
+        case 'follower': {
+          const index = Number(requireProp(obj, 'index'));
+          definition.followers.push({ id: obj.id, x: obj.x, y: obj.y, index });
+          break;
+        }
+
+        case 'altar': {
+          definition.altar = { id: obj.id, x: obj.x, y: obj.y };
+          break;
+        }
+
+        case 'headLift': {
+          definition.headLifts.push({ id: obj.id, x: obj.x, y: obj.y });
+          break;
+        }
+
+        // bunch, pile, card: parsed by later milestones
         default:
           break;
       }

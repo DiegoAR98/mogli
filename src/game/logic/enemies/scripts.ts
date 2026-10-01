@@ -4,6 +4,9 @@
  */
 
 import {
+  BULDEO_BOAST_S,
+  BULDEO_CHASE_DURATION_S,
+  BULDEO_DETECT_GRACE_S,
   CHARGER_FLEE_S,
   CHARGER_TELEGRAPH_S,
   DOG_LUNGE_DURATION_S,
@@ -267,4 +270,50 @@ export function stepTurret(state: TurretState, dtS: number, input: TurretStepInp
 /** Cobras and white cobras are never stompable (GDD §7.4): "the head is not a platform." */
 export function turretIsStompable(): false {
   return false;
+}
+
+// --- Buldeo (GDD §7.7 "he takes no hits and is not an enemy entry"; §10.7): a pursuit hazard --
+// with no stealth system. A Charger NPC on a fixed route; a 0.5 s grace inside his detect cone
+// puts a "!" over his head and starts a 6 s chase toward Mowgli's x; then he boasts and returns
+// to his route. This is deliberately its own small state machine rather than another stepCharger
+// extension: Buldeo is not part of the 8-entry enemy roster, takes no hits, and is never
+// stomped or scared -- a materially different contract from every Charger-script enemy.
+
+export type BuldeoPhase = 'patrol' | 'detecting' | 'chasing' | 'boasting';
+
+export interface BuldeoState {
+  phase: BuldeoPhase;
+  timerS: number;
+}
+
+export function initialBuldeoState(): BuldeoState {
+  return { phase: 'patrol', timerS: 0 };
+}
+
+export interface BuldeoStepInput {
+  playerInDetectZone: boolean;
+}
+
+export function stepBuldeo(state: BuldeoState, dtS: number, input: BuldeoStepInput): BuldeoState {
+  const timerS = state.timerS + dtS;
+
+  switch (state.phase) {
+    case 'patrol':
+      if (input.playerInDetectZone) return { phase: 'detecting', timerS: 0 };
+      return { phase: 'patrol', timerS: 0 };
+
+    case 'detecting':
+      if (!input.playerInDetectZone) return { phase: 'patrol', timerS: 0 };
+      if (timerS >= BULDEO_DETECT_GRACE_S) return { phase: 'chasing', timerS: 0 };
+      return { phase: 'detecting', timerS };
+
+    case 'chasing':
+      if (timerS >= BULDEO_CHASE_DURATION_S) return { phase: 'boasting', timerS: 0 };
+      return { phase: 'chasing', timerS };
+
+    case 'boasting':
+    default:
+      if (timerS >= BULDEO_BOAST_S) return { phase: 'patrol', timerS: 0 };
+      return { phase: 'boasting', timerS };
+  }
 }

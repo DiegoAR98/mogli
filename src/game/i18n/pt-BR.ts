@@ -56,7 +56,20 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
   'card.l4.afterB2': 'Olhai bem, ó Lobos. Mantive minha palavra?',
   'card.l4.act1': 'Sou dois Mowglis, mas a pele de Shere Khan está sob meus pés.',
 
+  'level.l5.title': 'Deixa a Selva Entrar',
+  'card.l5.intro': 'Velai-os, cobri-os, cercai-os com muros-- / Flor, e trepadeira, e erva daninha--',
+  'card.l5.bagheeraScare': 'Bagheera rosna nas sombras. Os vigias fogem e não voltam.',
+  'card.l5.lettingIn': 'Deixa a Selva entrar, Hathi!',
+  'card.l5.exit': 'Tua guerra será nossa guerra. Deixaremos a Selva entrar!',
+
+  'level.l6.title': 'Tesouro do Rei',
+  'card.l6.intro': 'Estes são os Quatro que nunca se contentam, que jamais se encheram desde que o Orvalho começou--',
+  'card.l6.rule': 'Leva as joias do Rei até o altar. Só contam as joias guardadas.',
+  'card.l6.afterB3': 'Nunca mais trarei para a Selva coisas estranhas--ainda que sejam tão belas quanto flores.',
+
   'hud.counter': 'achadas {count}/{quota}',
+  'hud.counterBanked': 'guardadas {count}/{quota}',
+  'hud.pouch': '({count})',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Encontre {name}',
   'hud.fullMoon': 'Lua Cheia',
@@ -65,6 +78,7 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
   'exit.kaa': 'Kaa',
   'exit.hathi': 'Hathi',
   'exit.greyBrother': 'Grey Brother',
+  'exit.thuu': 'Thuu',
 
   'pause.title': 'Pausado',
   'pause.resume': 'Retomar',

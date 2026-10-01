@@ -6,7 +6,7 @@ import type { Settings } from '../systems/settings';
 import { QUOTA_SILHOUETTE_S, QUOTA_TOAST_S, RED_FLOWER_CAP_S } from '../data/tuning';
 import type { DictKey } from '../i18n/en';
 
-const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa', hathi: 'exit.hathi', greyBrother: 'exit.greyBrother' };
+const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa', hathi: 'exit.hathi', greyBrother: 'exit.greyBrother', thuu: 'exit.thuu' };
 
 /**
  * Parallel scene (PLAN.md §3.2 rule 3): reads PlayScene's read-only accessors, the registry and
@@ -115,7 +115,10 @@ export class HudScene extends Phaser.Scene {
 
     const translator = this.registry.get('translator') as Translator | undefined;
     if (translator && this.counterText) {
-      this.counterText.setText(translator.t('hud.counter', { count: info.stonesCollected, quota: info.quotaValue }));
+      const label = info.invertedQuota
+        ? `${translator.t('hud.counterBanked', { count: info.stonesCollected, quota: info.quotaValue })} ${translator.t('hud.pouch', { count: info.pouchCount })}`
+        : translator.t('hud.counter', { count: info.stonesCollected, quota: info.quotaValue });
+      this.counterText.setText(label);
       this.counterText.setColor(info.quotaMet ? '#f2e94e' : '#f2e9d8');
     }
     if (translator && this.throwableText) {

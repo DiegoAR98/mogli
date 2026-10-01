@@ -55,7 +55,20 @@ export const en = {
   'card.l4.afterB2': 'Look well, O Wolves. Have I kept my word?',
   'card.l4.act1': 'I am two Mowglis, but the hide of Shere Khan is under my feet.',
 
+  'level.l5.title': 'Let in the Jungle',
+  'card.l5.intro': 'Veil them, cover them, wall them round-- / Blossom, and creeper, and weed--',
+  'card.l5.bagheeraScare': 'Bagheera snarls from the shadows. The watchmen flee and do not return.',
+  'card.l5.lettingIn': 'Let in the Jungle, Hathi!',
+  'card.l5.exit': 'Thy war shall be our war. We will let in the jungle!',
+
+  'level.l6.title': "King's Treasure",
+  'card.l6.intro': 'These are the Four that are never content, that have never been filled since the Dews began--',
+  'card.l6.rule': "Carry the King's jewels to the altar. Only banked jewels count.",
+  'card.l6.afterB3': 'I will never again bring into the Jungle strange things--not though they be as beautiful as flowers.',
+
   'hud.counter': 'found {count}/{quota}',
+  'hud.counterBanked': 'banked {count}/{quota}',
+  'hud.pouch': '({count})',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Find {name}',
   'hud.fullMoon': 'Full Moon',
@@ -64,6 +77,7 @@ export const en = {
   'exit.kaa': 'Kaa',
   'exit.hathi': 'Hathi',
   'exit.greyBrother': 'Grey Brother',
+  'exit.thuu': 'Thuu',
 
   'pause.title': 'Paused',
   'pause.resume': 'Resume',
