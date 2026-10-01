@@ -24,16 +24,19 @@ import {
   initialChargerState,
   initialTurretState,
   initialBuldeoState,
+  initialDiverState,
   stepLobber,
   stepCharger,
   stepTurret,
   stepBuldeo as stepBuldeoScript,
+  stepDiver,
   stompScatters,
   turretIsStompable,
   type LobberState,
   type ChargerState,
   type TurretState,
   type BuldeoState,
+  type DiverState,
 } from '../logic/enemies/scripts';
 import {
   carryPosition,
@@ -51,11 +54,13 @@ import {
   type Waypoint,
 } from '../logic/platforms/PathFollower';
 import { initialRedFlowerState, isWithinFleeRadius, pickUpPot, tickRedFlower, toggleRedFlower, type RedFlowerState } from '../logic/items/RedFlower';
+import { initialGarlicState, isGarlicActive, rubGarlic, tickGarlic, type GarlicState } from '../logic/items/Garlic';
 import { activateBeckon, checkQuota, initialExitNpcState, initialQuotaState, touchExit, type ExitNpcState, type QuotaState } from '../logic/collectibles/ExitNPC';
 import { applyHit, canBeHit, isBlinkVisible } from '../logic/player/hitResponse';
 import { tickCountUp, isCountUpComplete } from '../logic/player/frameCounter';
 import { currentAttack, initialBossState, isHittable, registerHit, stepBoss, type BossAttackSub, type BossData, type BossMachineState } from '../logic/boss/BossMachine';
-import { B1_FLUNG_FESTOON, B2_LAME_ONE, B3_THUU } from '../data/bosses';
+import { B1_FLUNG_FESTOON, B2_LAME_ONE, B3_THUU, B4_RED_DOG } from '../data/bosses';
+import { gainPaw, initialPawsFromRallied, losePaw, rollIntercept } from '../logic/boss/PackStrength';
 import { TIERS, type TierId } from '../data/tiers';
 import type { Settings } from '../systems/settings';
 import { Translator } from '../systems/locale';
@@ -71,6 +76,7 @@ import {
   B3_STRIKE_HEIGHT_TILES,
   B3_STRIKE_REACH_TILES,
   B3_TREASURE_TOSS_SPOTS,
+  B4_LEADER_RUSH_SPEED_PX_S,
   BODY_STANDING_H_PX,
   BODY_STANDING_W_PX,
   BUFFALO_ADVANCE_SPEED_PX_S,
@@ -78,6 +84,11 @@ import {
   BULDEO_DETECT_HEIGHT_TILES,
   BULDEO_DETECT_WIDTH_TILES,
   BULDEO_ROUTE_SPEED_PX_S,
+  BEE_CLOUD_LEASH_TILES,
+  BEE_CLOUD_SPEED_PX_S,
+  DIVER_RETURN_TRAVEL_S,
+  HIVE_TRIGGER_RANGE_TILES,
+  SLOW_WATER_SPEED_MULTIPLIER,
   HEAD_LIFT_HOLD_FRAMES,
   HEAD_LIFT_LOWER_S,
   HEAD_LIFT_RISE_S,
@@ -145,6 +156,9 @@ interface EnemyRuntime {
   chargeDir: -1 | 1;
   /** Truce zone (GDD §10.5): every enemy is passive and walks to drink while true. */
   truced: boolean;
+  /** B4's dhole adds (GDD §8.5): each Pack paw gives a 10% chance to intercept this enemy's
+   * contact before it lands, instead of a hit. */
+  packIntercept: boolean;
 }
 
 /** Buldeo (GDD §7.7, §10.7): not an enemy entry, takes no hits, never stomped or scared. */
@@ -154,6 +168,14 @@ interface BuldeoRuntime {
   patrolLeft: number;
   patrolRight: number;
   direction: -1 | 1;
+}
+
+/** A bee cloud (S3 Diver, GDD §7.7 #8): cannot be hit, released by its own hive. */
+interface DiverRuntime {
+  sprite: Rect;
+  state: DiverState;
+  hiveX: number;
+  hiveY: number;
 }
 
 interface NutRuntime {
@@ -243,6 +265,14 @@ export class PlayScene extends Phaser.Scene {
   private bouncePads: Array<{ sprite: Rect; cooldownS: number }> = [];
   private fences: Array<{ sprite: Rect; broken: boolean }> = [];
   private truceZones: Array<{ x: number; y: number; w: number; h: number }> = [];
+
+  // --- Zone 4 (GDD §7.3, §7.7 #7-8, §9.4, §10.9-10.10) ------------------------------------------
+  private garlic: GarlicState = initialGarlicState();
+  private garlicPickups: Array<{ sprite: Phaser.GameObjects.Rectangle; claimed: boolean }> = [];
+  private hives: Array<{ sprite: Rect; turretState: TurretState; cloud: DiverRuntime | null }> = [];
+  private safeWaterZones: Array<{ x: number; y: number; w: number; h: number }> = [];
+  private slowWaterZones: Array<{ x: number; y: number; w: number; h: number }> = [];
+  private packPaws = 0;
 
   // --- S7 Boss encounter (GDD §8.1-8.2): reuses S3 scripts scaled up, per the GDD's own rule ---
   private bossDoorZone?: { x: number; y: number; w: number; h: number };
@@ -379,6 +409,10 @@ export class PlayScene extends Phaser.Scene {
         this.physics.add.existing(sprite, true);
         this.physics.add.collider(this.player, sprite);
         this.altarGates.push({ sprite, opened: false });
+      } else if (t.flag === 'safeWater') {
+        this.safeWaterZones.push({ x: t.x, y: t.y, w: t.w, h: t.h });
+      } else if (t.flag === 'slowWater') {
+        this.slowWaterZones.push({ x: t.x, y: t.y, w: t.w, h: t.h });
       }
     }
     for (const fence of this.level.fences) {
@@ -445,6 +479,12 @@ export class PlayScene extends Phaser.Scene {
         };
         continue;
       }
+      if (enemyDef.script === 'turret' && enemyDef.flags.includes('hive')) {
+        const sprite = this.add.rectangle(enemyDef.x, enemyDef.y - 6, 14, 14, 0xc9b458) as Rect;
+        this.physics.add.existing(sprite, true);
+        this.hives.push({ sprite, turretState: initialTurretState(), cloud: null });
+        continue;
+      }
       const sprite = this.add.rectangle(enemyDef.x, enemyDef.y - 6, 10, 12, 0xb84a4a) as Rect;
       this.physics.add.existing(sprite);
       sprite.body.setCollideWorldBounds(false);
@@ -466,6 +506,7 @@ export class PlayScene extends Phaser.Scene {
         lunge: enemyDef.flags.includes('lunge'),
         chargeDir: enemyDef.facing,
         truced: false,
+        packIntercept: enemyDef.flags.includes('packIntercept'),
       });
     }
   }
@@ -480,6 +521,10 @@ export class PlayScene extends Phaser.Scene {
         const sprite = this.add.rectangle(pickup.x, pickup.y - 4, 10, 8, 0x8a6a3a);
         this.physics.add.existing(sprite, true);
         this.clodPickups.push({ sprite, claimed: false });
+      } else if (pickup.kind === 'garlic') {
+        const sprite = this.add.rectangle(pickup.x, pickup.y - 4, 8, 8, 0xf2e9d8);
+        this.physics.add.existing(sprite, true);
+        this.garlicPickups.push({ sprite, claimed: false });
       }
     }
   }
@@ -496,7 +541,7 @@ export class PlayScene extends Phaser.Scene {
     const bd = this.level.bossDoor;
     this.bossDoorZone = { x: bd.x, y: bd.y, w: bd.w, h: bd.h };
     this.bossId = bd.bossId;
-    this.bossData = bd.bossId === 'B2' ? B2_LAME_ONE : bd.bossId === 'B3' ? B3_THUU : B1_FLUNG_FESTOON;
+    this.bossData = bd.bossId === 'B2' ? B2_LAME_ONE : bd.bossId === 'B3' ? B3_THUU : bd.bossId === 'B4' ? B4_RED_DOG : B1_FLUNG_FESTOON;
 
     const hurtbox = this.add.rectangle(bd.x, bd.y + bd.h - 20, 14, 14, 0x8a4a8a) as Rect;
     this.physics.add.existing(hurtbox, true);
@@ -576,10 +621,13 @@ export class PlayScene extends Phaser.Scene {
     this.stepRoarTriggers();
     this.stepSnakeGates();
     this.stepRedFlower(snapshot, dtS);
+    this.stepGarlic(dtS);
     this.stepThrow(snapshot, dtS);
     this.stepNuts(dtS);
     this.stepEnemyNutsVsPlayer();
     this.stepEnemies(dtS);
+    this.stepHives(dtS);
+    this.stepBeeClouds(dtS);
     this.stepSwing(dtS, snapshot);
     this.stepCrumblePlatforms();
     this.stepCarryPlatforms(dtS);
@@ -634,7 +682,9 @@ export class PlayScene extends Phaser.Scene {
     const inputDir = snapshot.held.left ? -1 : snapshot.held.right ? 1 : 0;
     if (inputDir !== 0) this.facing = inputDir;
     if (!isCountdownActive(this.knockbackLockFrames)) {
-      const maxSpeed = this.crouched ? WALK_SPEED_PX_S : RUN_SPEED_PX_S;
+      const inSlowWater = this.slowWaterZones.some((z) => this.player.x > z.x && this.player.x < z.x + z.w && this.player.y > z.y && this.player.y < z.y + z.h);
+      const baseSpeed = this.crouched ? WALK_SPEED_PX_S : RUN_SPEED_PX_S;
+      const maxSpeed = inSlowWater ? baseSpeed * SLOW_WATER_SPEED_MULTIPLIER : baseSpeed; // GDD §10.10: "jump unchanged"
       const vx = integrateHorizontalVelocity(body.velocity.x, inputDir as -1 | 0 | 1, grounded, maxSpeed, dtS);
       body.setVelocityX(vx);
     }
@@ -797,7 +847,10 @@ export class PlayScene extends Phaser.Scene {
   private stepPitOverlaps(): void {
     // A pit is anywhere below the level's bottom bound, or a marked chasm (GDD §6.5): every
     // gap respawns Mowgli, not only the ones a designer remembered to cover with a trigger.
-    if (this.player.y > this.level.heightTiles * TILE_PX + TILE_PX * 2) {
+    // safeWater (GDD §10.9's Waingunga pool) is the one named exception: landing below the
+    // level's own bound there is the intended exit, not a fall.
+    const inSafeWater = this.safeWaterZones.some((z) => this.player.x > z.x && this.player.x < z.x + z.w && this.player.y > z.y && this.player.y < z.y + z.h);
+    if (!inSafeWater && this.player.y > this.level.heightTiles * TILE_PX + TILE_PX * 2) {
       this.respawn();
       return;
     }
@@ -831,6 +884,15 @@ export class PlayScene extends Phaser.Scene {
         pickup.sprite.setVisible(false);
         this.clodCount = Math.min(CLOD_PILE_ROW.cap, this.clodCount + CLOD_PILE_ROW.count);
         if (!this.throwableOrder.includes('clod')) this.throwableOrder.splice(1, 0, 'clod');
+      }
+    }
+    for (const pickup of this.garlicPickups) {
+      const dx = pickup.sprite.x - this.player.x;
+      const dy = pickup.sprite.y - this.player.y;
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 14) {
+        // Garlic is re-rubbed any number of times (GDD §10.9 beat 3: "re-rub at a second bed"),
+        // so pickups are never claimed/hidden the way a one-shot pot or pile is.
+        this.garlic = rubGarlic(this.garlic);
       }
     }
   }
@@ -924,6 +986,63 @@ export class PlayScene extends Phaser.Scene {
       if (isWithinFleeRadius(this.redFlower, distanceTiles)) {
         if (enemy.script === 'turret') this.calmTurret(enemy);
         else this.forceEnemyFlee(enemy);
+      }
+    }
+  }
+
+  /** Garlic (GDD §7.3, §10.9): re-rubbed any number of times, no toggle -- it just counts down. */
+  private stepGarlic(dtS: number): void {
+    this.garlic = tickGarlic(this.garlic, dtS);
+  }
+
+  /** Hives (S3 Turret spawner, GDD §7.7 #8, §10.9): reuses stepTurret's own idle/telegraph/
+   * lunge/rest cycle, with "lunge" releasing a bee cloud instead of a strike. */
+  private stepHives(dtS: number): void {
+    for (const hive of this.hives) {
+      const distanceTiles = Phaser.Math.Distance.Between(hive.sprite.x, hive.sprite.y, this.player.x, this.player.y) / TILE_PX;
+      const playerInRange = distanceTiles <= HIVE_TRIGGER_RANGE_TILES && !isGarlicActive(this.garlic);
+
+      const result = stepTurret(hive.turretState, dtS, { playerInRange, hit: false, calmed: false });
+      hive.turretState = result.state;
+
+      if (result.didLunge && !hive.cloud) {
+        const sprite = this.add.rectangle(hive.sprite.x, hive.sprite.y, 24, 24, 0xf2e94e, 0.6) as Rect;
+        this.physics.add.existing(sprite);
+        sprite.body.setAllowGravity(false);
+        hive.cloud = { sprite, state: initialDiverState(), hiveX: hive.sprite.x, hiveY: hive.sprite.y };
+      }
+    }
+  }
+
+  /** The bee cloud itself (GDD §7.7 #8): cannot be hit, pursues within the hive's leash at
+   * BEE_CLOUD_SPEED_PX_S, then returns home and is released again once the hive's own rest ends. */
+  private stepBeeClouds(dtS: number): void {
+    for (const hive of this.hives) {
+      const cloud = hive.cloud;
+      if (!cloud) continue;
+
+      const distanceToHiveTiles = Phaser.Math.Distance.Between(cloud.hiveX, cloud.hiveY, this.player.x, this.player.y) / TILE_PX;
+      const withinLeash = distanceToHiveTiles <= BEE_CLOUD_LEASH_TILES && !isGarlicActive(this.garlic);
+      const result = stepDiver(cloud.state, dtS, withinLeash, DIVER_RETURN_TRAVEL_S);
+      cloud.state = result.state;
+
+      if (result.arrivedHome) {
+        cloud.sprite.destroy();
+        hive.cloud = null;
+        continue;
+      }
+
+      const targetX = cloud.state.phase === 'pursuing' ? this.player.x : cloud.hiveX;
+      const targetY = cloud.state.phase === 'pursuing' ? this.player.y : cloud.hiveY;
+      const dx = targetX - cloud.sprite.x;
+      const dy = targetY - cloud.sprite.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const step = Math.min(dist, BEE_CLOUD_SPEED_PX_S * dtS);
+      cloud.sprite.setPosition(cloud.sprite.x + (dx / dist) * step, cloud.sprite.y + (dy / dist) * step);
+      cloud.sprite.body.reset(cloud.sprite.x, cloud.sprite.y);
+
+      if (cloud.state.phase === 'pursuing' && Phaser.Geom.Intersects.RectangleToRectangle(cloud.sprite.getBounds(), this.player.getBounds())) {
+        this.applyHitToPlayer(this.player.x < cloud.sprite.x ? -1 : 1);
       }
     }
   }
@@ -1267,8 +1386,17 @@ export class PlayScene extends Phaser.Scene {
       }
     }
 
-    if (enemy.contactDamage && enemy.chargerState.phase !== 'fleeing' && Phaser.Geom.Intersects.RectangleToRectangle(enemy.sprite.getBounds(), this.player.getBounds())) {
-      this.applyHitToPlayer(enemy.sprite.x < this.player.x ? 1 : -1);
+    // Gated on the player's own i-frames (same guard applyHitToPlayer uses): without it, an
+    // overlap spanning several ticks before knockback separates the two would re-roll the
+    // intercept and (on a miss) strip a paw every tick, instead of once per hit.
+    if (enemy.contactDamage && enemy.chargerState.phase !== 'fleeing' && canBeHit(this.iframesFrames) && Phaser.Geom.Intersects.RectangleToRectangle(enemy.sprite.getBounds(), this.player.getBounds())) {
+      if (enemy.packIntercept && rollIntercept(this.packPaws, Math.random)) {
+        // The Pack intercepts it first (GDD §8.5): a visible lunge and bark, no damage, no paw lost.
+        enemy.chargerState = stepCharger(enemy.chargerState, 0, { hitOrStomped: true, thief: false, stoneNearby: false, reachedStone: false }).state;
+      } else {
+        if (enemy.packIntercept) this.packPaws = losePaw(this.packPaws);
+        this.applyHitToPlayer(enemy.sprite.x < this.player.x ? 1 : -1);
+      }
     }
 
     const tint =
@@ -1411,7 +1539,8 @@ export class PlayScene extends Phaser.Scene {
       const dy = next.y - prevY;
       if (dx === 0 && dy === 0) continue;
 
-      // Break any thorn fence this (advancing) platform now overlaps (GDD §10.6's "breakable tag").
+      // Break any thorn fence this (advancing) platform now overlaps (GDD §10.6's "breakable
+      // tag"), or smash any hive a boulder rolls into (GDD §10.9, the same advanceOnHit reuse).
       if (c.advanceOnHit) {
         for (const fence of this.fences) {
           if (fence.broken) continue;
@@ -1419,6 +1548,17 @@ export class PlayScene extends Phaser.Scene {
             fence.broken = true;
             fence.sprite.setVisible(false);
             fence.sprite.body.enable = false;
+          }
+        }
+        for (const hive of this.hives) {
+          if (!hive.sprite.visible) continue;
+          if (Phaser.Geom.Intersects.RectangleToRectangle(c.sprite.getBounds(), hive.sprite.getBounds())) {
+            hive.sprite.setVisible(false);
+            hive.sprite.body.enable = false;
+            if (hive.cloud) {
+              hive.cloud.sprite.destroy();
+              hive.cloud = null;
+            }
           }
         }
       }
@@ -1505,6 +1645,10 @@ export class PlayScene extends Phaser.Scene {
     // body-center falls inside it), which is the right "feet y" for a respawn point.
     this.checkpoint = activateCheckpoint({ checkpointId: 'boss-B1', x: zone.x, y: zone.y + zone.h, spawnFacing: 1 });
     this.pips = healOnCheckpoint(LEAF_PIPS_MAX);
+
+    // Pack strength (GDD §8.5): starts from L8's rallied wolves, which share stonesCollected
+    // with every other collectible per D98's "same count, quota, sting" rule.
+    if (this.bossId === 'B4') this.packPaws = initialPawsFromRallied(this.stonesCollected);
   }
 
   private stepBossFight(dtS: number, snapshot: InputSnapshot): void {
@@ -1515,11 +1659,18 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
+    const prevPhaseIndex = this.bossState.phaseIndex;
     this.bossState = stepBoss(this.bossState, dtS, this.bossData, this.tierId);
+    // Akela's cinematic (GDD §8.5 beat 5): the Pack answers his howl for +2 paws, at the
+    // wave1->wave2 to wave2->wave3 transition (the midpoint, simplified to any phase advance).
+    if (this.bossId === 'B4' && this.bossState.phaseIndex > prevPhaseIndex) {
+      this.packPaws = gainPaw(gainPaw(this.packPaws));
+    }
     const attack = currentAttack(this.bossState, this.bossData);
     const hittable = isHittable(this.bossState);
     if (this.bossId === 'B2') this.updateBossHazardB2(attack, this.bossState.sub);
     else if (this.bossId === 'B3') this.updateBossHazardB3(attack, this.bossState.sub);
+    else if (this.bossId === 'B4') this.updateBossHazardB4(attack, this.bossState.sub);
     else this.updateBossHazardB1(attack, this.bossState.sub);
 
     this.bossHurtboxSprite.setVisible(hittable);
@@ -1529,6 +1680,7 @@ export class PlayScene extends Phaser.Scene {
       for (const nut of [...this.nuts]) {
         if (Phaser.Geom.Intersects.RectangleToRectangle(nut.sprite.getBounds(), this.bossHurtboxSprite.getBounds())) {
           this.bossState = registerHit(this.bossState, this.bossData, this.tierId);
+          if (this.bossId === 'B4') this.packPaws = gainPaw(this.packPaws);
           this.destroyNut(nut.sprite);
           break;
         }
@@ -1779,6 +1931,56 @@ export class PlayScene extends Phaser.Scene {
     }
   }
 
+  /** B4 Red Dog at the Ford (GDD §8.5): the bay-colored leader's rush and leap. The dhole-pair
+   * lunges each wave are a concurrent ambient hazard (GDD's own "adds, no boss hit"), handled by
+   * the two pack-intercept Charger entries already placed in `this.enemies`, not here. */
+  private updateBossHazardB4(attack: ReturnType<typeof currentAttack>, sub: BossAttackSub): void {
+    if (!this.bossDoorZone || !this.bossHazardSprite || !this.bossHurtboxSprite) return;
+    const anchorX = this.bossDoorZone.x;
+    const anchorY = this.bossDoorZone.y + this.bossDoorZone.h - 20;
+
+    switch (attack.id) {
+      case 'leaderLeap': {
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          const t = Math.min(1, this.bossState.timerS / attack.activeS);
+          const x = Phaser.Math.Linear(anchorX + 60, anchorX, t);
+          const arcY = anchorY - Math.sin(t * Math.PI) * 20;
+          this.bossHazardSprite.setPosition(x, arcY);
+          this.bossHurtboxSprite.setPosition(x, arcY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+          this.bossHurtboxSprite.setPosition(anchorX, anchorY);
+        }
+        break;
+      }
+      case 'leaderRush':
+      default: {
+        this.bossHurtboxSprite.setPosition(anchorX, anchorY);
+        if (sub === 'active') {
+          this.bossHazardSprite.setVisible(true);
+          this.bossHazardSprite.body.enable = true;
+          const halfSpanPx = (B4_LEADER_RUSH_SPEED_PX_S * attack.activeS) / 2;
+          const t = Math.min(1, this.bossState.timerS / attack.activeS);
+          const x = Phaser.Math.Linear(anchorX + halfSpanPx, anchorX - halfSpanPx, t);
+          this.bossHazardSprite.setPosition(x, anchorY);
+          if (Phaser.Geom.Intersects.RectangleToRectangle(this.bossHazardSprite.getBounds(), this.player.getBounds())) {
+            this.applyHitToPlayer(this.player.x < x ? -1 : 1);
+          }
+        } else {
+          this.bossHazardSprite.setVisible(false);
+          this.bossHazardSprite.body.enable = false;
+        }
+        break;
+      }
+    }
+  }
+
   private spawnBossNut(x: number, y: number): void {
     const dir = x < this.player.x ? 1 : -1;
     const sprite = this.add.rectangle(x, y, 4, 4, 0xb84a4a) as Rect;
@@ -1989,6 +2191,8 @@ export class PlayScene extends Phaser.Scene {
       clodCount: this.clodCount,
       pouchCount: this.pouchCount,
       invertedQuota: this.level.altar !== null,
+      rallied: this.level.stones.some((s) => s.skin === 'wolf'),
+      packPaws: this.bossId === 'B4' ? this.packPaws : null,
       boss: this.bossActive
         ? { phaseIndex: this.bossState.phaseIndex, phaseCount: this.bossData.phases.length, hitsThisPhase: this.bossState.hitsThisPhase, hitsRequired: TIERS[this.tierId].bossHitsPerPhase, defeated: this.bossState.defeated }
         : null,

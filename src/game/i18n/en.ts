@@ -66,9 +66,20 @@ export const en = {
   'card.l6.rule': "Carry the King's jewels to the altar. Only banked jewels count.",
   'card.l6.afterB3': 'I will never again bring into the Jungle strange things--not though they be as beautiful as flowers.',
 
+  'level.l7.title': 'Bee Rocks',
+  'card.l7.intro': 'For our white and our excellent nights---for the nights of swift running.',
+
+  'level.l8.title': 'The Ford',
+  'card.l8.intro': 'For the strength of the Pack is the Wolf, and the strength of the Wolf is the Pack.',
+  'card.l8.exit': 'It is met, and we go to the fight. Bay! O Bay!',
+  'card.b4.akelaFarewell': 'All debts are paid now. Go to thine own people.',
+  'card.b4.phaoHowl': 'Howl, dogs! A Wolf has died to-night!',
+
   'hud.counter': 'found {count}/{quota}',
   'hud.counterBanked': 'banked {count}/{quota}',
   'hud.pouch': '({count})',
+  'hud.counterRallied': 'rallied {count}/{quota}',
+  'hud.packPaws': 'paws {count}/5',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Find {name}',
   'hud.fullMoon': 'Full Moon',
@@ -78,6 +89,7 @@ export const en = {
   'exit.hathi': 'Hathi',
   'exit.greyBrother': 'Grey Brother',
   'exit.thuu': 'Thuu',
+  'exit.phao': 'Phao',
 
   'pause.title': 'Paused',
   'pause.resume': 'Resume',

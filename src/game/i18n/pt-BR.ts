@@ -67,9 +67,20 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
   'card.l6.rule': 'Leva as joias do Rei até o altar. Só contam as joias guardadas.',
   'card.l6.afterB3': 'Nunca mais trarei para a Selva coisas estranhas--ainda que sejam tão belas quanto flores.',
 
+  'level.l7.title': 'Rochas das Abelhas',
+  'card.l7.intro': 'Por nossas noites brancas e excelentes---pelas noites de corrida veloz.',
+
+  'level.l8.title': 'O Vau',
+  'card.l8.intro': 'Pois a força da Alcateia é o Lobo, e a força do Lobo é a Alcateia.',
+  'card.l8.exit': 'Está combinado, e vamos à luta. Uivai! Ó, uivai!',
+  'card.b4.akelaFarewell': 'Todas as dívidas estão pagas agora. Vai para o teu povo.',
+  'card.b4.phaoHowl': 'Uivai, cães! Um Lobo morreu esta noite!',
+
   'hud.counter': 'achadas {count}/{quota}',
   'hud.counterBanked': 'guardadas {count}/{quota}',
   'hud.pouch': '({count})',
+  'hud.counterRallied': 'reunidos {count}/{quota}',
+  'hud.packPaws': 'patas {count}/5',
   'hud.counterTotal': '{total}',
   'hud.quotaToast': 'Encontre {name}',
   'hud.fullMoon': 'Lua Cheia',
@@ -79,6 +90,7 @@ export const ptBR: Record<DictKey, Dictionary[string]> = {
   'exit.hathi': 'Hathi',
   'exit.greyBrother': 'Grey Brother',
   'exit.thuu': 'Thuu',
+  'exit.phao': 'Phao',
 
   'pause.title': 'Pausado',
   'pause.resume': 'Retomar',

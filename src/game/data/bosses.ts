@@ -57,6 +57,28 @@ export const B2_LAME_ONE: BossData = {
   ],
 };
 
+/** B4 Red Dog at the Ford (GDD §8.5): three waves against the bay-colored leader. The dhole-pair
+ * lunges each wave lists are ambient adds ("no boss hit", GDD's own words) handled as concurrent
+ * Charger-script hazards outside this data, exactly like B1's ambient cobras (GDD §8.2) -- only
+ * the leader's own attack is a BossMachine phase here. */
+export const B4_RED_DOG: BossData = {
+  id: 'B4',
+  phases: [
+    {
+      id: 'wave1',
+      attacks: [{ id: 'leaderRush', windUpS: 0.8, activeS: 0.7, recoveryS: HEAVY_RECOVERY_S }],
+    },
+    {
+      id: 'wave2',
+      attacks: [{ id: 'leaderRush', windUpS: 0.8, activeS: 0.7, recoveryS: HEAVY_RECOVERY_S }],
+    },
+    {
+      id: 'wave3',
+      attacks: [{ id: 'leaderLeap', windUpS: 1.0, activeS: 0.5, recoveryS: HEAVY_RECOVERY_S }],
+    },
+  ],
+};
+
 /** B3 Thuu, the White Hood (GDD §8.4): the White Cobra of the vault. */
 export const B3_THUU: BossData = {
   id: 'B3',

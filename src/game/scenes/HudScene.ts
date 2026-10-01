@@ -6,7 +6,7 @@ import type { Settings } from '../systems/settings';
 import { QUOTA_SILHOUETTE_S, QUOTA_TOAST_S, RED_FLOWER_CAP_S } from '../data/tuning';
 import type { DictKey } from '../i18n/en';
 
-const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa', hathi: 'exit.hathi', greyBrother: 'exit.greyBrother', thuu: 'exit.thuu' };
+const EXIT_CHARACTER_KEYS: Record<string, DictKey> = { akela: 'exit.akela', kaa: 'exit.kaa', hathi: 'exit.hathi', greyBrother: 'exit.greyBrother', thuu: 'exit.thuu', phao: 'exit.phao' };
 
 /**
  * Parallel scene (PLAN.md §3.2 rule 3): reads PlayScene's read-only accessors, the registry and
@@ -30,6 +30,7 @@ export class HudScene extends Phaser.Scene {
   private touchControlsInitialized = false;
   private quotaMetAtS: number | null = null;
   private bossDots: Phaser.GameObjects.Rectangle[] = [];
+  private pawsText?: Phaser.GameObjects.Text;
 
   constructor() {
     super('Hud');
@@ -46,6 +47,13 @@ export class HudScene extends Phaser.Scene {
       this.throwableText = this.add.text(240, 8, '', { fontFamily: 'monospace', fontSize: '10px', color: '#f2e9d8' }).setScrollFactor(0).setDepth(900);
       this.toastText = this.add
         .text(160, 24, '', { fontFamily: 'monospace', fontSize: '9px', color: '#f2e94e', align: 'center' })
+        .setOrigin(0.5, 0)
+        .setScrollFactor(0)
+        .setDepth(900);
+
+      // Pack strength (GDD §8.5, B4 only): a small paw count beside the boss dots.
+      this.pawsText = this.add
+        .text(160, 500, '', { fontFamily: 'monospace', fontSize: '9px', color: '#f2e9d8' })
         .setOrigin(0.5, 0)
         .setScrollFactor(0)
         .setDepth(900);
@@ -117,7 +125,9 @@ export class HudScene extends Phaser.Scene {
     if (translator && this.counterText) {
       const label = info.invertedQuota
         ? `${translator.t('hud.counterBanked', { count: info.stonesCollected, quota: info.quotaValue })} ${translator.t('hud.pouch', { count: info.pouchCount })}`
-        : translator.t('hud.counter', { count: info.stonesCollected, quota: info.quotaValue });
+        : info.rallied
+          ? translator.t('hud.counterRallied', { count: info.stonesCollected, quota: info.quotaValue })
+          : translator.t('hud.counter', { count: info.stonesCollected, quota: info.quotaValue });
       this.counterText.setText(label);
       this.counterText.setColor(info.quotaMet ? '#f2e94e' : '#f2e9d8');
     }
@@ -138,6 +148,10 @@ export class HudScene extends Phaser.Scene {
     }
 
     this.updateBossDots(info.boss);
+
+    if (translator && this.pawsText) {
+      this.pawsText.setText(info.packPaws !== null ? translator.t('hud.packPaws', { count: info.packPaws }) : '');
+    }
   }
 
   private updateBossDots(boss: ReturnType<PlayScene['getHudInfo']>['boss']): void {

@@ -187,6 +187,35 @@ export const RAMA_SPEED_PX_S = 48;
 // Truce zone (GDD §10.5, S5 truce flag): every enemy passive, throws drop at Mowgli's feet
 export const TRUCE_DROP_RANGE_PX = 16;
 
+// Garlic (GDD §7.3): GARLIC_SECONDS_PER_RUB/GARLIC_CAP_S above have been declared since M1/M2,
+// unused until this milestone wires the item into L7.
+
+// Bee cloud (S3 Diver, GDD §7.7 #8): a hazard that cannot be hit
+export const BEE_CLOUD_SPEED_PX_S = 64;
+export const BEE_CLOUD_LEASH_TILES = 12;
+export const BEE_CLOUD_HIT_INTERVAL_S = 0.5;
+export const BEE_CLOUD_RETURN_S = 6;
+export const DIVER_RETURN_TRAVEL_S = 2;
+export const HIVE_TRIGGER_RANGE_TILES = 3;
+
+// Dhole scout pair (Charger, paired, contact damage, GDD §7.7 #7): reuses the dog lunge exactly
+export const DHOLE_PATROL_SPEED_PX_S = 64;
+export const DHOLE_LUNGE_RANGE_TILES = 3;
+
+// Boulders (S4, GDD §10.9): started by a nut hit, like the buffalo's advanceOnHit
+export const BOULDER_SPEED_PX_S = 160;
+
+// L8 The Ford (GDD §9.4, §10.10)
+export const SLOW_WATER_SPEED_MULTIPLIER = 0.5;
+export const FLOATING_LOG_SPEED_PX_S = 32;
+
+// B4 Red Dog at the Ford (GDD §8.5): the Pack strength / paw meter
+export const PACK_PAWS_PER_3_RALLIED = 1;
+export const PACK_PAWS_MAX = 5;
+export const PACK_INTERCEPT_CHANCE_PER_PAW = 0.1;
+export const B4_DHOLE_PAIR_LUNGE_SPEED_PX_S = 96;
+export const B4_LEADER_RUSH_SPEED_PX_S = 128;
+
 // Buldeo (GDD §7.7 "he takes no hits and is not an enemy entry"; §10.7 L5): a pursuit hazard,
 // the Charger script's own pursue sub-mode (a bounded extension scoped to Buldeo only)
 export const BULDEO_ROUTE_SPEED_PX_S = 48;

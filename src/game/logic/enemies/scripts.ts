@@ -294,6 +294,33 @@ export interface BuldeoStepInput {
   playerInDetectZone: boolean;
 }
 
+// --- Bee cloud (S3 Diver, GDD §7.7 #8): a hazard that cannot be hit -----------------------------
+// Pursues within the hive's leash, then returns. Hives (Turret spawners) release one of these
+// when their own stepTurret cycle reaches "lunge" (reused as the release trigger, not a strike).
+
+export type DiverPhase = 'pursuing' | 'returning';
+
+export interface DiverState {
+  phase: DiverPhase;
+  timerS: number;
+}
+
+export function initialDiverState(): DiverState {
+  return { phase: 'pursuing', timerS: 0 };
+}
+
+export function stepDiver(state: DiverState, dtS: number, withinLeash: boolean, returnTravelS: number): { state: DiverState; arrivedHome: boolean } {
+  const timerS = state.timerS + dtS;
+
+  if (state.phase === 'pursuing') {
+    if (!withinLeash) return { state: { phase: 'returning', timerS: 0 }, arrivedHome: false };
+    return { state: { phase: 'pursuing', timerS }, arrivedHome: false };
+  }
+
+  if (timerS >= returnTravelS) return { state: { phase: 'returning', timerS }, arrivedHome: true };
+  return { state: { phase: 'returning', timerS }, arrivedHome: false };
+}
+
 export function stepBuldeo(state: BuldeoState, dtS: number, input: BuldeoStepInput): BuldeoState {
   const timerS = state.timerS + dtS;
 
